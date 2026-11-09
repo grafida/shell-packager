@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - name: PHP syntax
+        run: find bin src -type f \( -name '*.php' -o -path 'bin/*' \) -print0 2>/dev/null | xargs -0 -n1 php -l
+      - name: Shell scripts
+        run: |
+          files=$(find . -name '*.sh' -not -path './vendor/*')
+          if [ -n "$files" ]; then shellcheck $files; else echo "no shell scripts yet"; fi
+      - name: Smoke
+        run: bin/shell-packager --version

@@ -1,0 +1,22 @@
+{
+    "name": "grafida/shell-packager",
+    "description": "Build and packaging tooling for apps on the Grafida desktop shell: PHAR building, runtime fetch-and-verify, macOS/Windows/Linux bundling, signing and notarisation.",
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/grafida/shell-packager",
+    "authors": [
+        {
+            "name": "Nicholas K. Dionysopoulos",
+            "homepage": "https://www.dionysopoulos.me/about-me"
+        }
+    ],
+    "require": {
+        "php": "^8.4"
+    },
+    "bin": [
+        "bin/shell-packager"
+    ],
+    "config": {
+        "sort-packages": true
+    }
+}
