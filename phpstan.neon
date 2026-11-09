@@ -1,0 +1,11 @@
+includes:
+    - vendor/phpstan/phpstan-strict-rules/rules.neon
+
+parameters:
+    level: max
+    paths:
+        - src
+        - bin/shell-packager
+        - tests
+    excludePaths:
+        - tests/fixtures/*

@@ -1,0 +1,1 @@
+{"name": "test/runtime-lib", "autoload": {"psr-4": {"Test\\RuntimeLib\\": "src"}}}

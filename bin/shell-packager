@@ -10,30 +10,32 @@
 
 declare(strict_types=1);
 
-const SHELL_PACKAGER_VERSION = '0.1.0-dev';
+$args = array_values(array_filter(is_array($_SERVER['argv'] ?? null) ? $_SERVER['argv'] : [], 'is_string'));
 
-$command = $argv[1] ?? 'help';
-
-switch ($command) {
-    case '--version':
-    case 'version':
-        fwrite(STDOUT, 'shell-packager ' . SHELL_PACKAGER_VERSION . PHP_EOL);
-        exit(0);
-
-    case 'help':
-    case '--help':
-        $version = SHELL_PACKAGER_VERSION;
-        fwrite(STDOUT, <<<TXT
-            shell-packager {$version}
-
-            Usage: shell-packager <command> [options]
-
-            No commands are implemented yet; see https://github.com/grafida/grafida/issues/82.
-
-            TXT);
-        exit(0);
-
-    default:
-        fwrite(STDERR, "shell-packager: unknown command '{$command}'\n");
-        exit(64);
+// Building a PHAR needs phar.readonly off, which only the command line can do: start again with it.
+if ((bool) ini_get('phar.readonly') && getenv('SHELL_PACKAGER_REEXEC') === false) {
+    putenv('SHELL_PACKAGER_REEXEC=1');
+    $command = array_merge([PHP_BINARY, '-d', 'phar.readonly=0', '-d', 'memory_limit=1G'], $args);
+    $process = proc_open($command, [STDIN, STDOUT, STDERR], $pipes);
+    exit(is_resource($process) ? proc_close($process) : 1);
 }
+
+$autoloaders = [
+    __DIR__ . '/../vendor/autoload.php',        // this package, checked out on its own
+    __DIR__ . '/../../../autoload.php',         // installed as a dependency: vendor/grafida/shell-packager/bin
+];
+
+foreach ($autoloaders as $autoloader) {
+    if (is_file($autoloader)) {
+        require $autoloader;
+
+        break;
+    }
+}
+
+if (!class_exists(Grafida\ShellPackager\Cli::class)) {
+    fwrite(STDERR, "shell-packager: cannot find Composer's autoloader; run composer install.\n");
+    exit(1);
+}
+
+exit(Grafida\ShellPackager\Cli::main($args));

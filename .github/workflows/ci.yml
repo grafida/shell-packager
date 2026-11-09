@@ -11,18 +11,61 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
           coverage: none
+      - run: composer install --no-interaction --no-progress
       - name: PHP syntax
-        run: find bin src -type f \( -name '*.php' -o -path 'bin/*' \) -print0 2>/dev/null | xargs -0 -n1 php -l
+        run: find bin src tests -type f \( -name '*.php' -o -path 'bin/*' \) -not -path 'tests/fixtures/*/vendor/*' -print0 | xargs -0 -n1 php -l
       - name: Shell scripts
+        run: shellcheck scripts/*.sh resources/linux/install.sh
+      - name: PHPStan (level max)
+        run: composer linter:check
+
+  # The suite, on both architectures, with the pinned phpmicro SFX so the worker checks run for real.
+  test:
+    name: Tests (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          ini-values: phar.readonly=0
+      - run: composer install --no-interaction --no-progress
+      - name: Fetch the pinned SFX
         run: |
-          files=$(find . -name '*.sh' -not -path './vendor/*')
-          if [ -n "$files" ]; then shellcheck $files; else echo "no shell scripts yet"; fi
-      - name: Smoke
-        run: bin/shell-packager --version
+          sfx="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch="$(uname -m)" | sed -n 's/^sfx: //p')"
+          echo "SHELL_PACKAGER_TEST_SFX=$sfx" >> "$GITHUB_ENV"
+      - run: composer test
+
+  # A packaged tarball of the fixture app, with the real pinned shell, launcher and SFX, installed
+  # and run headless (scripts/e2e-linux.sh).
+  e2e:
+    name: End to end (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - name: The shell's runtime dependencies (and a headless display)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0 xvfb dbus
+      - run: composer install --no-interaction --no-progress
+      - run: scripts/e2e-linux.sh

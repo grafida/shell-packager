@@ -1,0 +1,9 @@
+{
+    "name": "test/app",
+    "type": "project",
+    "repositories": [{"type": "path", "url": "../packages/*"}],
+    "require": {"test/runtime-lib": "@dev"},
+    "require-dev": {"test/dev-lib": "@dev"},
+    "autoload": {"psr-4": {"App\\": "src"}},
+    "minimum-stability": "dev"
+}

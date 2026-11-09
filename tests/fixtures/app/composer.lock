@@ -1,0 +1,59 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "2cc8ace666cf81766ecae1c85537b2ac",
+    "packages": [
+        {
+            "name": "test/runtime-lib",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "../packages/runtime-lib",
+                "reference": "807095e52bc400b2eb2186122b3dc2cb1ebe7f87"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Test\\RuntimeLib\\": "src"
+                }
+            },
+            "transport-options": {
+                "relative": true
+            }
+        }
+    ],
+    "packages-dev": [
+        {
+            "name": "test/dev-lib",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "../packages/dev-lib",
+                "reference": "e84745260427a65b0a26098076e13aadbf0cdc50"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Test\\DevLib\\": "src"
+                }
+            },
+            "transport-options": {
+                "relative": true
+            }
+        }
+    ],
+    "aliases": [],
+    "minimum-stability": "dev",
+    "stability-flags": {
+        "test/dev-lib": 20,
+        "test/runtime-lib": 20
+    },
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {},
+    "platform-dev": {},
+    "plugin-api-version": "2.11.0"
+}

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Packager Test
+Comment=A fixture
+Exec=whatever
+Icon=whatever
+Categories=Utility;
+
+[Desktop Action New]
+Name=New
+Exec=whatever --new
