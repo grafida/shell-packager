@@ -146,6 +146,11 @@ final class Cli
             }
 
             Codesign::verify($app);
+
+            if (!$codesign->adHoc() && Codesign::isAdHoc($app)) {
+                // Imaged into a Developer ID image, an ad-hoc app would fail only at notarisation.
+                throw new PackagerException("--app={$app} is signed ad hoc, but " . Codesign::IDENTITY_ENV . ' is set: build it with the identity.');
+            }
         } else {
             $work = Filesystem::tempDir('macos-app');
             $app  = $work . '/' . $config->macos()->name . '.app';

@@ -81,6 +81,14 @@ final readonly class Codesign
         Process::mustRun(['codesign', '--verify', '--strict', '--verbose=2', $path]);
     }
 
+    /** True when $path is signed ad hoc (no identity). */
+    public static function isAdHoc(string $path): bool
+    {
+        [, $out, $err] = Process::run(['codesign', '-d', '--verbose=2', $path]);
+
+        return preg_match('/^Signature=adhoc$/m', $out . $err) === 1;
+    }
+
     /** True when the signature asks for the hardened runtime. */
     public static function hasHardenedRuntime(string $path): bool
     {
