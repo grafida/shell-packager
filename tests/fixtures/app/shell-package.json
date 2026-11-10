@@ -45,7 +45,7 @@
             "shell": {
                 "url": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-linux-{arch}",
                 "sha256": {
-                    "x86_64": "e215ac9f43d343c87083c5f981f6a1a1aa1a9b6b6f2edd18892d23675150a7c1",
+                    "x86_64": "e215ac9f47d343c87083c5f981f6a1a1aa1a9b6b6f2edd18892d23675150a7c1",
                     "aarch64": "e991f9fb7236b708130c8abb95324c162221684c8d98298928eb88c515b6ec3c"
                 }
             },
