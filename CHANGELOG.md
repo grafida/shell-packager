@@ -1,4 +1,4 @@
-shell-packager 0.3.0 (unreleased)
+shell-packager 0.3.0
 ================================================================================
 + `windows-tree`: the x86_64 install tree, shell and SFX stub with the app's icon and version resources, signed
 + `windows-installer`: the app's own NSIS script compiled by makensis on any host, its uninstaller signed through `!uninstfinalize` (+ `.sha256`)
