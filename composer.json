@@ -14,6 +14,7 @@
         "php": "^8.4",
         "ext-curl": "*",
         "ext-json": "*",
+        "ext-mbstring": "*",
         "ext-phar": "*",
         "ext-zlib": "*",
         "seld/phar-utils": "^1.2"

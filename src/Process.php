@@ -57,7 +57,9 @@ final class Process
 
     public static function exists(string $tool): bool
     {
-        [$code] = self::run(['/bin/sh', '-c', 'command -v "$0" >/dev/null', $tool]);
+        [$code] = \PHP_OS_FAMILY === 'Windows'
+            ? self::run(['where', '/q', $tool])
+            : self::run(['/bin/sh', '-c', 'command -v "$0" >/dev/null', $tool]);
 
         return $code === 0;
     }

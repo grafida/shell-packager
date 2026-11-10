@@ -26,7 +26,7 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
 - **The ini block is checked by running it** (`Phar\WorkerCheck`): phpmicro ignores a malformed
   block silently and then writes its bytes to stdout. The handshake check (protocol v1 `ready`) is
   the app-agnostic proof that a payload boots. Both need a host of the target's OS and architecture
-  (Linux, or an arm64 Mac); elsewhere they are skipped with a note, never faked. On macOS the
+  (Linux, an arm64 Mac, or Windows x86_64); elsewhere they are skipped with a note, never faked. On macOS the
   handshake runs on the **signed stub inside the finished bundle** (`handshakeAt`), under the
   hardened runtime with the entitlements it was given: that is the test any entitlement must fail
   without before it is kept (grafida/grafida#88).
@@ -47,8 +47,27 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   volume mounted at exactly `/Volumes/<volumeName>` is styled. The volume icon goes on after the
   layout (Finder deletes one that is there when it opens the window). `hdiutil attach`/`detach`
   print a deprecation warning on newer macOS; `diskutil image` does not exist on 12, so they stay.
-- **`runtimes` is grouped by platform** (`linux`, `macos`); a flat one is Linux's, and a mix is an
-  error. Grafida's configuration used the flat shape.
+- **Windows (`src/Windows/`) is x86_64 only, and everything runs on any host** (the Mac builds and
+  signs Windows packages; grafida/grafida#91). `PeFile` reads PE32+ and PE32 (NSIS writes x86
+  installers): machine, subsystem, sections, directories, imports, the overlay and the certificate
+  table. `ResourceWriter` rebuilds `.rsrc` **in place** and moves `.reloc` (nothing refers to it but
+  its directory) behind it; any other layout is refused, not patched. The manifest resource is kept;
+  icons and the version are replaced. A file with an overlay (an SFX with its PHAR appended) is never
+  given resources or signed. `VersionInfo::decode()` exists so the tests read back what Windows
+  reads; it was checked against PHP's own `rc.exe`-built block.
+- **Windows signing is Jsign, from the environment** (`WINDOWS_SIGN_*`: Trusted Signing, or a PKCS#12
+  keystore for tests), secrets as `env:` references, each signature checked with `osslsigncode`
+  (digest always, chain with `WINDOWS_SIGN_CAFILE`). The uninstaller is signed by the app's `.nsi`
+  through `!uninstfinalize '${SHELL_PACKAGER_SIGN}'`, which runs `windows-sign`; it records what it
+  signed in `SHELL_PACKAGER_SIGN_LOG`, and an empty record fails the build.
+- **On a Windows host** (the worker check, CI): `proc_open()` pipes are not selectable, so the
+  handshake polls a stdout file; `composer` runs through a command string (CreateProcess runs no
+  `.bat` without its extension, and a batch file found on PATH under a quoted name gets the wrong
+  `%~dp0`); a path package is installed as a **copy** (the lock's `transport-options`, which an
+  install from a lock reads; composer's junction is a leaf to `RecursiveDirectoryIterator`, so the
+  package went missing from the PHAR). The Linux fixture tarball was byte-identical before and after.
+- **`runtimes` is grouped by platform** (`linux`, `macos`, `windows`); a flat one is Linux's, and a
+  mix is an error. Grafida's configuration used the flat shape.
 - **Determinism:** sorted PHAR entries, `seld/phar-utils` timestamps, `SOURCE_DATE_EPOCH`, and our
   own `Archive\TarWriter` (ustar, uid/gid 0, fixed mtime, streamed gzip). PharData cannot set modes
   and times, and BSD tar on macOS has no `--sort`/`--mtime`, while Linux packages are also built on
@@ -58,8 +77,13 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   `scripts/e2e-linux.sh` packages it, installs it and runs it headless (CI does, on both arches);
   `scripts/e2e-macos.sh` builds its DMG, mounts it, copies the app out and launches it **through
   LaunchServices** (`open`), which is the only thing that reads `Info.plist` (CI does, on macos-15,
-  with `--no-style`). Bump those pins when a new shell or SFX should be covered. The macOS tests need
-  `SHELL_PACKAGER_TEST_MACOS_SHELL` and `_SFX` (CI fetches the pins with `fetch --platform=macos`).
+  with `--no-style`). `scripts/e2e-windows.sh` builds its installer (or takes one, `INSTALLER=`, as the
+  test guests do), installs it silently, reads back the resources and signatures as Windows does,
+  launches it and uninstalls it (CI does, unsigned, on windows-2022). ⚠️ In Git Bash an NSIS switch
+  is `//S` (MSYS rewrites `/S` to `S:/`), and `/D=` takes a path with no space in it. Bump those pins
+  when a new shell or SFX should be covered. The macOS tests need `SHELL_PACKAGER_TEST_MACOS_SHELL`
+  and `_SFX`, the Windows ones `SHELL_PACKAGER_TEST_WINDOWS_SHELL` and `_SFX` (CI fetches the pins
+  with `fetch --platform=…`).
 - **Every Linux change is checked byte for byte**: with a fixed `SOURCE_DATE_EPOCH`, the fixture's
   tarball before and after must have the same SHA-256 (done for the 0.2.0 refactor, on the 0.1.0
   pins, before they were bumped).

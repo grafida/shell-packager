@@ -1,3 +1,17 @@
+shell-packager 0.3.0 (unreleased)
+================================================================================
++ `windows-tree`: the x86_64 install tree, shell and SFX stub with the app's icon and version resources, signed
++ `windows-installer`: the app's own NSIS script compiled by makensis on any host, its uninstaller signed through `!uninstfinalize`
++ `windows-sign`: Authenticode with Jsign from the environment (Trusted Signing, or a test keystore), checked with osslsigncode
++ `runtimes.windows` and a `windows` section; `fetch --platform=windows`
++ A PE reader in PHP (PE32+ and PE32): a stub with its payload appended is refused, never signed
++ Icon and version resources written in PHP: `.rsrc` rebuilt in place, `.reloc` moved behind it, the manifest kept
++ The worker check runs on Windows hosts, on the signed stub in the finished tree
++ Windows end-to-end test: the fixture installer installed silently, launched and uninstalled (CI, windows-2022)
+- On Windows hosts: composer ran as a quoted batch file, and a path package installed as a junction went missing from the PHAR
+- A drive-letter path in the configuration was taken for a relative one
+~ `ext-mbstring` is required
+
 shell-packager 0.2.0
 ================================================================================
 + `macos-app`: an arm64 app bundle with a generated `Info.plist`, signed inside-out with the hardened runtime

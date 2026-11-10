@@ -32,6 +32,8 @@ use PHPUnit\Framework\TestCase;
  * the signatures read back, the worker answering from inside the signed bundle, and the image.
  */
 #[RequiresSetting('phar.readonly', '0')]
+// A bundle is assembled on Linux and macOS (Linux CI checks its layout); never on a Windows host.
+#[\PHPUnit\Framework\Attributes\RequiresOperatingSystem('^(?!WIN)')]
 final class MacAppTest extends TestCase
 {
     private string $dir;

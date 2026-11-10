@@ -35,7 +35,10 @@ final class FetcherTest extends TestCase
 
     private function runtime(string $pin): Runtime
     {
-        return Runtime::fromArray('tool', ['url' => 'file://' . $this->dir . '/src/tool-{arch}', 'sha256' => ['amd64' => $pin]]);
+        // file:///C:/… on Windows: file://C:\… has no path parse_url() can read.
+        $dir = \PHP_OS_FAMILY === 'Windows' ? '/' . str_replace('\\', '/', $this->dir) : $this->dir;
+
+        return Runtime::fromArray('tool', ['url' => 'file://' . $dir . '/src/tool-{arch}', 'sha256' => ['amd64' => $pin]]);
     }
 
     public function testAPinnedDownloadIsCachedByItsHash(): void

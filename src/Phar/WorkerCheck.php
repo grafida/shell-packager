@@ -18,7 +18,7 @@ use Grafida\ShellPackager\Platform;
 
 /**
  * Runs the packaged worker before it ships, when this machine can (the target's OS and
- * architecture: Linux, or an arm64 Mac):
+ * architecture: Linux, an arm64 Mac, or Windows x86_64):
  *
  * - **the ini probe:** a tiny PHAR behind the same extra-INI block, on the same stub, reports
  *   `ini_get()` for every key; each must be what was asked for. This is what catches a block
@@ -30,7 +30,12 @@ use Grafida\ShellPackager\Platform;
  * Both run in a throwaway directory with every per-user directory pointed into it, so the worker
  * never touches the real user's data. On macOS the handshake also runs in place, on the signed stub
  * inside the finished bundle ({@see handshakeAt()}): that proves the stub finds its `.phar` in
- * `../Resources` and runs under the hardened runtime with the entitlements it was given.
+ * `../Resources` and runs under the hardened runtime with the entitlements it was given. On Windows
+ * it runs on the signed stub in the finished tree (grafida/grafida#91): resources written,
+ * Authenticode signature appended, `<name>.phar` beside it.
+ *
+ * ⚠️ On Windows `stream_select()` does not work on `proc_open()` pipes, so the worker's stdout goes
+ * to a file there, which is polled for the frame.
  */
 final class WorkerCheck
 {
@@ -39,15 +44,16 @@ final class WorkerCheck
     public static function canRun(Arch $arch, Platform $platform = Platform::Linux): bool
     {
         $os = match ($platform) {
-            Platform::Linux => 'Linux',
-            Platform::Macos => 'Darwin',
+            Platform::Linux   => 'Linux',
+            Platform::Macos   => 'Darwin',
+            Platform::Windows => 'Windows',
         };
 
         return \PHP_OS_FAMILY === $os && Arch::host() === $arch;
     }
 
     /** @param array<string, bool|int|float|string> $ini */
-    public static function iniProbe(string $sfx, array $ini): void
+    public static function iniProbe(string $sfx, array $ini, Platform $platform = Platform::Linux): void
     {
         if ($ini === []) {
             return;
@@ -63,10 +69,11 @@ final class WorkerCheck
             unset($p);
 
             Filesystem::write($work . '/probe.phar', IniBlock::encode($ini) . Filesystem::read($phar));
-            copy($sfx, $work . '/probe');
-            chmod($work . '/probe', 0o755);
+            $probe = $work . '/probe' . ($platform === Platform::Windows ? '.exe' : '');
+            copy($sfx, $probe);
+            chmod($probe, 0o755);
 
-            [$code, $out, $err] = self::run([$work . '/probe'], $work, '');
+            [$code, $out, $err] = self::run([$probe], $work, '');
             $actual             = json_decode($out, true);
 
             if ($code !== 0 || !\is_array($actual)) {
@@ -96,11 +103,13 @@ final class WorkerCheck
         $work = Filesystem::tempDir('handshake');
 
         try {
-            copy($sfx, $work . '/' . $name);
-            chmod($work . '/' . $name, 0o755);
+            // On Windows the stub is <name>.exe, and finds <name>.phar beside it.
+            $exe = $work . '/' . $name . (\PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
+            copy($sfx, $exe);
+            chmod($exe, 0o755);
             copy($payload, $work . '/' . $name . '.phar');
 
-            return self::talk($work . '/' . $name, $work);
+            return self::talk($exe, $work);
         } finally {
             Filesystem::remove($work);
         }
@@ -124,6 +133,10 @@ final class WorkerCheck
 
     private static function talk(string $executable, string $work): string
     {
+        if (\PHP_OS_FAMILY === 'Windows') {
+            return self::talkThroughFile($executable, $work);
+        }
+
         $process = proc_open(
             [$executable],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $work . '/stderr', 'w']],
@@ -188,6 +201,83 @@ final class WorkerCheck
             );
         }
 
+        return self::readyHeader($header, $exited, $tail);
+    }
+
+    /**
+     * Windows: stdout into a file, polled for the frame; stdin a pipe, closed once it has come.
+     */
+    private static function talkThroughFile(string $executable, string $work): string
+    {
+        $out     = $work . '/stdout';
+        $process = proc_open(
+            [$executable],
+            [0 => ['pipe', 'r'], 1 => ['file', $out, 'w'], 2 => ['file', $work . '/stderr', 'w']],
+            $pipes,
+            $work,
+            self::isolatedEnv($work)
+        );
+
+        if (!\is_resource($process)) {
+            throw new PackagerException('Cannot start the packaged worker.');
+        }
+
+        $buffer   = '';
+        $header   = null;
+        $deadline = microtime(true) + self::READY_TIMEOUT;
+
+        while (microtime(true) < $deadline) {
+            clearstatcache(true, $out);
+            $buffer = is_file($out) ? (string) file_get_contents($out) : '';
+
+            if (\strlen($buffer) >= 8) {
+                if (!str_starts_with($buffer, 'GSF1')) {
+                    break;
+                }
+
+                /** @var array{1: int} $length */
+                $length = unpack('V', substr($buffer, 4, 4));
+
+                if (\strlen($buffer) >= 8 + $length[1]) {
+                    $header = substr($buffer, 8, $length[1]);
+                    break;
+                }
+            }
+
+            if (!proc_get_status($process)['running']) {
+                break;
+            }
+
+            usleep(100000);
+        }
+
+        fclose($pipes[0]);
+        $exited = false;
+
+        for ($i = 0; $i < 100 && !$exited; $i++) {
+            $exited = !proc_get_status($process)['running'];
+            if (!$exited) {
+                usleep(100000);
+            }
+        }
+
+        $exited ? proc_close($process) : self::kill($process);
+        $stderr = is_file($work . '/stderr') ? Filesystem::read($work . '/stderr') : '';
+        $tail   = implode("\n", \array_slice(explode("\n", trim($stderr)), -20));
+
+        if ($header === null) {
+            throw new PackagerException(
+                "The packaged worker sent no ready frame within " . self::READY_TIMEOUT . " s.\n"
+                . ($buffer !== '' ? 'stdout began with: ' . json_encode(substr($buffer, 0, 80)) . "\n" : '')
+                . "stderr:\n" . $tail
+            );
+        }
+
+        return self::readyHeader($header, $exited, $tail);
+    }
+
+    private static function readyHeader(string $header, bool $exited, string $tail): string
+    {
         $decoded = json_decode($header, true);
 
         if (!\is_array($decoded) || ($decoded['type'] ?? null) !== 'ready' || ($decoded['protocol'] ?? null) !== 1) {
@@ -267,6 +357,26 @@ final class WorkerCheck
     private static function isolatedEnv(string $dir): array
     {
         $path = getenv('PATH');
+
+        if (\PHP_OS_FAMILY === 'Windows') {
+            $root = getenv('SystemRoot');
+            $root = \is_string($root) && $root !== '' ? $root : 'C:\\Windows';
+            $win  = str_replace('/', '\\', $dir);
+            @mkdir($dir . '/home/AppData/Roaming', 0o777, true);
+            @mkdir($dir . '/home/AppData/Local/Temp', 0o777, true);
+
+            // SystemRoot is not optional: Winsock and CryptoAPI fail without it.
+            return [
+                'PATH'         => \is_string($path) ? $path : $root . '\\System32',
+                'SystemRoot'   => $root,
+                'windir'       => $root,
+                'USERPROFILE'  => $win . '\\home',
+                'APPDATA'      => $win . '\\home\\AppData\\Roaming',
+                'LOCALAPPDATA' => $win . '\\home\\AppData\\Local',
+                'TEMP'         => $win . '\\home\\AppData\\Local\\Temp',
+                'TMP'          => $win . '\\home\\AppData\\Local\\Temp',
+            ];
+        }
 
         return [
             'PATH'            => \is_string($path) ? $path : '/usr/bin:/bin',

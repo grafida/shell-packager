@@ -16,4 +16,5 @@ enum Platform: string
 {
     case Linux = 'linux';
     case Macos = 'macos';
+    case Windows = 'windows';
 }

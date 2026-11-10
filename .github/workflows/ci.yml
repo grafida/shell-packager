@@ -46,6 +46,21 @@ jobs:
         run: |
           sfx="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch="$(uname -m)" | sed -n 's/^sfx: //p')"
           echo "SHELL_PACKAGER_TEST_SFX=$sfx" >> "$GITHUB_ENV"
+      # The Windows packaging runs on any host (the Mac builds Grafida's): the resource writer on the
+      # real pinned binaries, signing with a throwaway certificate, and the installer (grafida/grafida#91).
+      - name: Windows packaging tools (makensis 3.08, osslsigncode, a pinned Jsign) and pins
+        if: matrix.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis osslsigncode
+          curl -sSLf -o "$RUNNER_TEMP/jsign.jar" https://github.com/ebourg/jsign/releases/download/7.6/jsign-7.6.jar
+          echo "6cf58aa080e7ff82656f320cff8d4a3bff30408df8766806dcba3740dd839fa5  $RUNNER_TEMP/jsign.jar" | sha256sum -c -
+          printf '#!/bin/sh\nexec java -jar "%s" "$@"\n' "$RUNNER_TEMP/jsign.jar" | sudo tee /usr/local/bin/jsign >/dev/null
+          sudo chmod +x /usr/local/bin/jsign
+          out="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch=x86_64 --platform=windows)"
+          echo "$out"
+          echo "SHELL_PACKAGER_TEST_WINDOWS_SHELL=$(sed -n 's/^shell: //p' <<<"$out")" >> "$GITHUB_ENV"
+          echo "SHELL_PACKAGER_TEST_WINDOWS_SFX=$(sed -n 's/^sfx: //p' <<<"$out")" >> "$GITHUB_ENV"
       - run: composer test
 
   # A packaged tarball of the fixture app, with the real pinned shell, launcher and SFX, installed
@@ -106,3 +121,53 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --no-progress
       - run: scripts/e2e-macos.sh
+
+  # The suite on Windows, with the pinned Windows shell and SFX: the packager's own Windows paths
+  # (composer through cmd, drive-letter paths), and the worker check for real: the ini probe and
+  # the ready handshake on the Windows SFX (grafida/grafida#91).
+  test-windows:
+    name: Tests (windows-2022)
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          extensions: mbstring
+          ini-values: phar.readonly=0
+      - run: composer install --no-interaction --no-progress
+      - name: Fetch the pinned Windows runtimes
+        run: |
+          out="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch=x86_64 --platform=windows)"
+          echo "$out"
+          echo "SHELL_PACKAGER_TEST_WINDOWS_SHELL=$(sed -n 's/^shell: //p' <<<"$out")" >> "$GITHUB_ENV"
+          echo "SHELL_PACKAGER_TEST_WINDOWS_SFX=$(sed -n 's/^sfx: //p' <<<"$out")" >> "$GITHUB_ENV"
+      - run: composer test
+
+  # An installer of the fixture app, with the real pinned shell and SFX, built on Windows (with the
+  # worker check), installed silently, launched and uninstalled (scripts/e2e-windows.sh). Unsigned:
+  # the signed path is tested on Linux, and on the signed build in the test guests.
+  e2e-windows:
+    name: End to end (windows-2022)
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          extensions: mbstring
+      - run: composer install --no-interaction --no-progress
+      - name: makensis on PATH
+        run: |
+          nsis='C:\Program Files (x86)\NSIS'
+          [ -x "$(cygpath "$nsis")/makensis.exe" ] || choco install nsis -y --no-progress
+          echo "$nsis" >> "$GITHUB_PATH"
+      - run: scripts/e2e-windows.sh

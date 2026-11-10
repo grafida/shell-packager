@@ -152,7 +152,7 @@ final class PharBuilder
         }
 
         if (\is_array($json['repositories'] ?? null)) {
-            $json['repositories'] = array_map(static fn (mixed $r): mixed => self::absolutePath($r, $root), $json['repositories']);
+            $json['repositories'] = array_map(static fn (mixed $r): mixed => self::copied(self::absolutePath($r, $root)), $json['repositories']);
         }
 
         Filesystem::write($stage . '/composer.json', (string) json_encode($json, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES));
@@ -170,6 +170,13 @@ final class PharBuilder
                 $locked[$section] = array_map(static function (mixed $package) use ($root): mixed {
                     if (\is_array($package) && isset($package['dist'])) {
                         $package['dist'] = self::absolutePath($package['dist'], $root);
+
+                        // An install from a lock takes a path package's options from here, not from
+                        // composer.json's repository.
+                        if (\is_array($package['dist']) && ($package['dist']['type'] ?? null) === 'path') {
+                            $options                       = \is_array($package['transport-options'] ?? null) ? $package['transport-options'] : [];
+                            $package['transport-options'] = array_replace($options, ['symlink' => false]);
+                        }
                     }
 
                     return $package;
@@ -181,6 +188,15 @@ final class PharBuilder
 
         ($this->log)('Installing the runtime dependencies (composer install --no-dev)…');
         $command = [$this->composer, 'install', '--no-dev', '--no-scripts', '--no-interaction', '--no-progress', '--prefer-dist', '--working-dir=' . $stage];
+
+        if (\PHP_OS_FAMILY === 'Windows') {
+            // As a command string, run by cmd.exe: CreateProcess (the array form) runs no
+            // composer.bat named without its extension, and a batch file found on PATH under a
+            // quoted name gets the wrong %~dp0 (the working directory), which composer.bat
+            // wrappers use to find composer.phar. So the name goes unquoted, its arguments quoted.
+            $command = $this->composer . ' ' . implode(' ', array_map(escapeshellarg(...), \array_slice($command, 1)));
+        }
+
         $process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
 
         if (!\is_resource($process)) {
@@ -209,8 +225,24 @@ final class PharBuilder
 
         $url = $entry['url'] ?? null;
 
-        if (\is_string($url) && !str_starts_with($url, '/')) {
+        if (\is_string($url) && !str_starts_with($url, '/') && preg_match('/^[A-Za-z]:[\\\\\/]/', $url) !== 1) {
             $entry['url'] = $root . '/' . $url;
+        }
+
+        return $entry;
+    }
+
+    /**
+     * A path repository installed as a copy, never a link: on Windows composer links one with a
+     * junction, which RecursiveDirectoryIterator presents as a leaf and never enters, so the
+     * package went missing from the payload. A copy holds the same files under the same names on
+     * every host. (The lock's `transport-options` are set too: an install from a lock reads those.)
+     */
+    private static function copied(mixed $entry): mixed
+    {
+        if (\is_array($entry) && ($entry['type'] ?? null) === 'path') {
+            $options          = \is_array($entry['options'] ?? null) ? $entry['options'] : [];
+            $entry['options'] = array_replace($options, ['symlink' => false]);
         }
 
         return $entry;

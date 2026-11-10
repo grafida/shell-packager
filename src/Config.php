@@ -12,6 +12,7 @@ declare(strict_types=1);
 namespace Grafida\ShellPackager;
 
 use Grafida\ShellPackager\Macos\MacosConfig;
+use Grafida\ShellPackager\Windows\WindowsConfig;
 
 /**
  * An app's packaging configuration (a JSON file in the app, conventionally `shell-package.json`).
@@ -49,7 +50,8 @@ use Grafida\ShellPackager\Macos\MacosConfig;
  *     "files": {"LICENSE.txt": "LICENSE.txt"},
  *     "output": "build/dist/Grafida-{version}-linux-{debarch}-shell-preview.tar.gz"
  *   },
- *   "macos": {…}    // see Macos\MacosConfig
+ *   "macos": {…},   // see Macos\MacosConfig
+ *   "windows": {…}  // see Windows\WindowsConfig
  * }
  * ```
  *
@@ -83,6 +85,7 @@ final readonly class Config
         public array $files,
         public string $linuxOutput,
         public ?MacosConfig $macos = null,
+        public ?WindowsConfig $windows = null,
     ) {
     }
 
@@ -165,6 +168,7 @@ final readonly class Config
             files: $files,
             linuxOutput: self::string($linux, 'output', 'build/dist/{name}-{version}-linux-{arch}.tar.gz', 'linux'),
             macos: isset($data['macos']) ? self::parseMacos($root, self::object($data, 'macos', $real), self::string($manifest, 'title', null, $manifestPath)) : null,
+            windows: isset($data['windows']) ? self::parseWindows($root, self::object($data, 'windows', $real), self::string($manifest, 'title', null, $manifestPath)) : null,
         );
     }
 
@@ -177,6 +181,11 @@ final readonly class Config
     public function macos(): MacosConfig
     {
         return $this->macos ?? throw new PackagerException("The packaging configuration has no 'macos' section.");
+    }
+
+    public function windows(): WindowsConfig
+    {
+        return $this->windows ?? throw new PackagerException("The packaging configuration has no 'windows' section.");
     }
 
     /**
@@ -282,6 +291,68 @@ final readonly class Config
             volumeName: self::string($dmg, 'volumeName', $name, 'macos.dmg'),
             appOutput: self::string($macos, 'app', 'build/shell-macos/{name}.app', 'macos'),
             dmgOutput: self::string($macos, 'output', 'build/dist/{name}-{version}-macos-{debarch}.dmg', 'macos'),
+        );
+    }
+
+    /** @param array<mixed> $windows */
+    private static function parseWindows(string $root, array $windows, string $title): WindowsConfig
+    {
+        $name = self::string($windows, 'name', $title, 'windows');
+
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/', $name) !== 1 || str_ends_with(strtolower($name), '.exe') || str_ends_with($name, '.')) {
+            throw new PackagerException("windows.name '{$name}' must be a plain file name (letters, digits, space, . _ -), without .exe.");
+        }
+
+        $version = self::optionalObject($windows, 'version');
+
+        foreach (array_keys($version) as $key) {
+            if (!\in_array($key, ['companyName', 'legalCopyright', 'productName', 'shellDescription', 'workerDescription'], true)) {
+                throw new PackagerException("windows.version.{$key} is not a version string the packager writes.");
+            }
+        }
+
+        $files = [];
+
+        foreach (self::optionalObject($windows, 'files') as $file => $source) {
+            if (!\is_string($source) || str_contains((string) $file, '..') || str_starts_with((string) $file, '/') || str_contains((string) $file, '\\')) {
+                throw new PackagerException("windows.files maps a name in the tree to a file; got '{$file}'.");
+            }
+
+            $files[(string) $file] = self::path($root, $source, "windows.files.{$file}");
+        }
+
+        $installer = self::optionalObject($windows, 'installer');
+        $defines   = [];
+
+        foreach (self::optionalObject($installer, 'defines') as $key => $value) {
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', (string) $key) !== 1 || !\is_scalar($value)) {
+                throw new PackagerException("windows.installer.defines.{$key}: a define is a name (letters, digits, _) and a string.");
+            }
+
+            $defines[(string) $key] = (string) $value;
+        }
+
+        $reserved = array_intersect(array_keys($defines), \Grafida\ShellPackager\Windows\WindowsInstaller::DEFINES);
+
+        if ($reserved !== []) {
+            throw new PackagerException('windows.installer.defines may not set ' . implode(', ', $reserved) . ': the packager passes those.');
+        }
+
+        $text = static fn (string $key, string $default): string => self::string($version, $key, $default, 'windows.version');
+
+        return new WindowsConfig(
+            name: $name,
+            icon: isset($windows['icon']) ? self::path($root, self::string($windows, 'icon', null, 'windows'), 'windows.icon') : null,
+            companyName: $text('companyName', $name),
+            legalCopyright: isset($version['legalCopyright']) ? $text('legalCopyright', '') : '',
+            productName: $text('productName', $name),
+            shellDescription: $text('shellDescription', $name),
+            workerDescription: $text('workerDescription', $name . ' worker'),
+            files: $files,
+            installerScript: isset($installer['script']) ? self::path($root, self::string($installer, 'script', null, 'windows.installer'), 'windows.installer.script') : null,
+            defines: $defines,
+            treeOutput: self::string($windows, 'tree', 'build/shell-windows/{name}', 'windows'),
+            installerOutput: self::string($windows, 'output', 'build/dist/{name}-{version}-windows-{debarch}-Setup.exe', 'windows'),
         );
     }
 
@@ -394,7 +465,9 @@ final readonly class Config
 
     private static function path(string $root, string $relative, string $what): string
     {
-        $path = str_starts_with($relative, '/') ? $relative : $root . '/' . $relative;
+        // Absolute: /…, or on a Windows host C:\… or C:/… (the packager runs there for the worker check).
+        $absolute = str_starts_with($relative, '/') || preg_match('/^[A-Za-z]:[\\\\\/]/', $relative) === 1;
+        $path     = $absolute ? $relative : $root . '/' . $relative;
 
         if (!file_exists($path)) {
             throw new PackagerException("{$what}: {$path} does not exist.");

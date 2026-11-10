@@ -75,6 +75,7 @@ final class LinuxTarballTest extends TestCase
         self::assertFileDoesNotExist($out . '.part');
     }
 
+    #[\PHPUnit\Framework\Attributes\RequiresOperatingSystemFamily('Linux')]
     public function testTheInstallerInstallsAndUninstalls(): void
     {
         $out = $this->dir . '/test.tar.gz';

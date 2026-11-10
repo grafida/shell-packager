@@ -22,18 +22,30 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Against a real phpmicro sibling-phar SFX for this machine: a Linux one named by
- * SHELL_PACKAGER_TEST_SFX, or on an arm64 Mac a macOS one named by SHELL_PACKAGER_TEST_MACOS_SFX
- * (CI downloads the pinned ones); skipped without it.
+ * SHELL_PACKAGER_TEST_SFX, on an arm64 Mac a macOS one named by SHELL_PACKAGER_TEST_MACOS_SFX, or on
+ * Windows x86_64 a Windows one named by SHELL_PACKAGER_TEST_WINDOWS_SFX (CI downloads the pinned
+ * ones); skipped without it.
  */
 #[RequiresSetting('phar.readonly', '0')]
 final class WorkerCheckTest extends TestCase
 {
     private string $sfx;
 
+    private Platform $platform;
+
     protected function setUp(): void
     {
-        $platform = \PHP_OS_FAMILY === 'Darwin' ? Platform::Macos : Platform::Linux;
-        $env      = $platform === Platform::Macos ? 'SHELL_PACKAGER_TEST_MACOS_SFX' : 'SHELL_PACKAGER_TEST_SFX';
+        $platform = match (\PHP_OS_FAMILY) {
+            'Darwin'  => Platform::Macos,
+            'Windows' => Platform::Windows,
+            default   => Platform::Linux,
+        };
+        $env = match ($platform) {
+            Platform::Macos   => 'SHELL_PACKAGER_TEST_MACOS_SFX',
+            Platform::Windows => 'SHELL_PACKAGER_TEST_WINDOWS_SFX',
+            Platform::Linux   => 'SHELL_PACKAGER_TEST_SFX',
+        };
+        $this->platform = $platform;
         $sfx      = getenv($env);
         $arch     = Arch::host();
 
@@ -51,7 +63,7 @@ final class WorkerCheckTest extends TestCase
 
         try {
             (new PharBuilder())->build($config, $dir . '/test-worker.phar', 1700000000);
-            WorkerCheck::iniProbe($this->sfx, $config->ini);
+            WorkerCheck::iniProbe($this->sfx, $config->ini, $this->platform);
             $header = WorkerCheck::handshake($this->sfx, $dir . '/test-worker.phar', 'test-worker');
 
             self::assertStringContainsString('"type":"ready"', $header);
@@ -83,6 +95,6 @@ final class WorkerCheckTest extends TestCase
     {
         $this->expectExceptionMessage('did not apply the extra-INI block');
         // A setting phpmicro cannot apply from ini: an unknown name reads back as false.
-        WorkerCheck::iniProbe($this->sfx, ['shell_packager.no_such_setting' => 'x']);
+        WorkerCheck::iniProbe($this->sfx, ['shell_packager.no_such_setting' => 'x'], $this->platform);
     }
 }

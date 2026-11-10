@@ -7,9 +7,10 @@ Build and packaging tooling for applications built on the
 [Grafida](https://github.com/grafida/grafida)'s own build scripts, and it knows nothing about any
 one app's layout: everything app-specific comes from the app's configuration and manifest.
 
-**Status:** Linux (tarball + per-user installer) and macOS (arm64 bundle, signing, notarisation,
-DMG) work. Windows (NSIS, Authenticode) follows, as tracked in
-[grafida/grafida#82](https://github.com/grafida/grafida/issues/82).
+**Status:** Linux (tarball + per-user installer), macOS (arm64 bundle, signing, notarisation, DMG)
+and Windows (x86_64 install tree, icon and version resources, Authenticode, an NSIS installer) work,
+as tracked in [grafida/grafida#82](https://github.com/grafida/grafida/issues/82). Every platform's
+package is built and signed on any host: the Mac builds all of them.
 
 ## Use
 
@@ -19,8 +20,10 @@ composer require --dev grafida/shell-packager
 vendor/bin/shell-packager linux-tarball --config=shell-package.json --arch=x86_64 --app-version=1.0.0
 vendor/bin/shell-packager macos-app --config=shell-package.json --app-version=1.0.0
 vendor/bin/shell-packager macos-dmg --config=shell-package.json --app-version=1.0.0
+vendor/bin/shell-packager windows-tree --config=shell-package.json --app-version=1.0.0
+vendor/bin/shell-packager windows-installer --config=shell-package.json --app-version=1.0.0
 vendor/bin/shell-packager phar  --config=shell-package.json --output=build/app-worker.phar
-vendor/bin/shell-packager fetch --config=shell-package.json --arch=aarch64 [--platform=macos]
+vendor/bin/shell-packager fetch --config=shell-package.json --arch=aarch64 [--platform=linux|macos|windows]
 ```
 
 `SOURCE_DATE_EPOCH` fixes every timestamp. With the same inputs, the PHAR and the Linux tarball are
@@ -55,6 +58,10 @@ desktop entry and icons (and is the window's Wayland `app_id`), `title` appears 
     "macos": {
       "shell": {"url": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-macos-arm64",       "sha256": {"aarch64": "…"}},
       "sfx":   {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/macos-aarch64.standard.sfx",   "sha256": {"aarch64": "…"}}
+    },
+    "windows": {
+      "shell": {"url": "https://github.com/grafida/shell/releases/download/0.3.0/grafida-shell-windows-x86_64.exe", "sha256": {"x86_64": "…"}},
+      "sfx":   {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/windows-x86_64.standard.sfx",  "sha256": {"x86_64": "…"}}
     }
   },
   "linux": {
@@ -76,6 +83,15 @@ desktop entry and icons (and is the window's Wayland `app_id`), `title` appears 
     },
     "app": "build/shell-macos/{name}.app",
     "output": "build/dist/MyApp-{version}-macos-{debarch}.dmg"
+  },
+  "windows": {
+    "name": "MyApp",
+    "icon": "assets/MyApp.ico",
+    "version": {"companyName": "…", "legalCopyright": "…", "workerDescription": "MyApp worker"},
+    "files": {"LICENSE.txt": "LICENSE.txt"},
+    "installer": {"script": "build/windows/installer.nsi", "defines": {"SHORTCUTS": "yes"}},
+    "tree": "build/shell-windows/{name}",
+    "output": "build/dist/MyApp-{version}-windows-{debarch}-Setup.exe"
   }
 }
 ```
@@ -96,7 +112,8 @@ desktop entry and icons (and is the window's Wayland `app_id`), `title` appears 
 
 ## What is checked before a package is written
 
-On a machine of the target's OS and architecture (Linux, or an arm64 Mac), the packaged worker is run:
+On a machine of the target's OS and architecture (Linux, an arm64 Mac, or Windows x86_64), the
+packaged worker is run:
 
 - **an ini probe:** the same block, on the same SFX, must read back every setting. phpmicro
   silently ignores a malformed block.
@@ -105,7 +122,9 @@ On a machine of the target's OS and architecture (Linux, or an arm64 Mac), the p
 
 Both run with every per-user directory pointed at a temporary directory. On macOS the handshake runs
 on the **signed** stub inside the finished bundle, so it also proves the stub finds its payload in
-`../Resources` and runs under the hardened runtime with the entitlements it was given.
+`../Resources` and runs under the hardened runtime with the entitlements it was given. On Windows it
+runs on the signed stub in the finished tree, its resources rewritten and its signature appended.
+Elsewhere (a Windows package built on the Mac) it is skipped with a note, never faked.
 
 ## The Linux tarball
 
@@ -161,6 +180,45 @@ MyApp.app/Contents/
   after the layout. The image is UDZO, signed with the Developer ID when there is one.
 - **Notarisation** runs when `MACOS_NOTARY_PROFILE` names a `notarytool` keychain profile (it needs
   the identity too): submit and wait, staple, validate, and `spctl` on the image.
+
+## The Windows tree and installer
+
+```
+MyApp/
+  MyApp.exe              the shell, with windows.icon and a version resource
+  myapp-worker.exe       the phpmicro SFX stub, likewise
+  myapp-worker.phar      the worker payload (extra-INI block + PHAR)
+  shell.json
+  MyApp.ico              windows.icon, for shortcuts and Add/Remove Programs
+  …                      windows.files
+```
+
+- **x86_64 only**, and both executables must be GUI-subsystem (a console one would open a window),
+  bare (nothing appended: the stub's PHAR stays a sibling file) and unsigned (the packager writes
+  their resources first).
+- **Icon and version resources are written in PHP** on any host (no `rcedit`). The executable's
+  `.rsrc` section is rebuilt in place, keeping the application manifest, and the `.reloc` section
+  behind it moves up; the image size and checksum follow. `FileDescription` is what Task Manager
+  names the process by: `windows.version.shellDescription` (default: the name) and
+  `workerDescription` (default: "<name> worker"). The four-part version comes from `--app-version`:
+  major.minor.patch, then 1000 for a release, or 0–9 / 10–100 / 900–999 for alpha / beta / rc N, so
+  a pre-release sorts below its release.
+- **Signing comes from the environment**, with Jsign: Azure Trusted Signing (`WINDOWS_SIGN_ENDPOINT`,
+  `WINDOWS_SIGN_PROFILE` as `<account>/<profile>`, and `WINDOWS_SIGN_TOKEN`, an access token for
+  `https://codesigning.azure.net` the caller obtains), or a test keystore (`WINDOWS_SIGN_PKCS12`,
+  `WINDOWS_SIGN_PKCS12_PASSWORD`); neither leaves everything unsigned. The secrets reach Jsign as
+  `env:` references, never on its command line. Each signature is checked with `osslsigncode`: the
+  signed digest must match the file; the chain only when `WINDOWS_SIGN_CAFILE` names its roots. A
+  file with anything appended past its image is never signed (an installer is the one exception).
+- **The installer is the app's own NSIS script** (`windows.installer.script`), compiled by
+  `makensis` 3.08 or later, which runs on macOS and Linux. It gets the tree and the documented
+  defines (`SRCDIR`, `OUTFILE`, `APPNAME`, `APPID`, `APPEXE`, `WORKEREXE`, `WORKERPHAR`, `ICONFILE`,
+  `APPVERSION`, `VIVERSION`, `PUBLISHER`; see `src/Windows/WindowsInstaller.php`) plus
+  `windows.installer.defines`. When signing, it also gets `SHELL_PACKAGER_SIGN`, and **must** sign its
+  uninstaller with it (`!uninstfinalize '${SHELL_PACKAGER_SIGN}' = 0`), since the uninstaller is
+  written inside the installer and nothing can reach it later; a script that does not is refused,
+  and one that signs nothing fails the build. Then the installer itself is signed.
+  `tests/fixtures/app/installer.nsi` is a complete example.
 
 ## Licence
 
