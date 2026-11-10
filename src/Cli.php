@@ -270,6 +270,9 @@ final class Cli
             if ($signer->enabled()) {
                 self::say('Signed the installer: ' . $signer->sign($output, hasOverlay: true));
             }
+
+            // Of the final (signed) bytes, as for the Linux tarball and the macOS image.
+            Filesystem::write($output . '.sha256', hash_file('sha256', $output) . '  ' . basename($output) . "\n");
         } finally {
             Filesystem::remove($work);
         }

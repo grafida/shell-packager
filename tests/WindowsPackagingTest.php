@@ -183,7 +183,7 @@ final class WindowsPackagingTest extends TestCase
         $data = Filesystem::read($path);
         Filesystem::write($path, substr_replace($data, "\x90", 0x500, 1));
         $this->expectExceptionMessage('does not match');
-        Authenticode::verify($path);
+        Authenticode::verify($path, $signer->caFile);
     }
 
     public function testTheInstallerIsBuiltSignedWithItsUninstaller(): void

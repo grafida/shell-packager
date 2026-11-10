@@ -186,6 +186,11 @@ final readonly class Authenticode
 
         if (preg_match('/^Current message digest\s*:\s*([0-9A-F]+)/mi', $text, $current) !== 1
             || preg_match('/^Calculated message digest\s*:\s*([0-9A-F]+)/mi', $text, $calculated) !== 1) {
+            if ($caFile === null && str_contains($text, '-CAfile')) {
+                // Older osslsigncode (Ubuntu 22.04's 2.2) reads nothing without roots to check against.
+                throw new PackagerException('This osslsigncode checks a signature only against given roots: set ' . self::CAFILE_ENV . ".\n" . trim($text));
+            }
+
             throw new PackagerException("{$path} carries no readable Authenticode signature:\n" . trim($text));
         }
 

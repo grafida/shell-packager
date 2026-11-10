@@ -1,7 +1,7 @@
 shell-packager 0.3.0 (unreleased)
 ================================================================================
 + `windows-tree`: the x86_64 install tree, shell and SFX stub with the app's icon and version resources, signed
-+ `windows-installer`: the app's own NSIS script compiled by makensis on any host, its uninstaller signed through `!uninstfinalize`
++ `windows-installer`: the app's own NSIS script compiled by makensis on any host, its uninstaller signed through `!uninstfinalize` (+ `.sha256`)
 + `windows-sign`: Authenticode with Jsign from the environment (Trusted Signing, or a test keystore), checked with osslsigncode
 + `runtimes.windows` and a `windows` section; `fetch --platform=windows`
 + A PE reader in PHP (PE32+ and PE32): a stub with its payload appended is refused, never signed
