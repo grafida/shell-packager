@@ -190,6 +190,12 @@ final class MacDmg
         $q       = static fn (string $s): string => '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $s) . '"';
         $script  = implode("\n", [
             'tell application "Finder"',
+            // Finder sees a volume a moment after hdiutil has mounted it (about a second, measured).
+            '  set waited to 0',
+            '  repeat until (exists disk ' . $q($macos->volumeName) . ') or waited > 20',
+            '    delay 0.5',
+            '    set waited to waited + 0.5',
+            '  end repeat',
             '  tell disk ' . $q($macos->volumeName),
             '    open',
             '    set current view of container window to icon view',
