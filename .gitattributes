@@ -1,0 +1,7 @@
+# Every text file is checked out with LF on every host: the Linux install.sh and the
+# fixtures are packaged byte for byte, and a Windows host builds packages too (grafida/grafida#91).
+* text=auto eol=lf
+*.ico binary
+*.icns binary
+*.png binary
+*.gif binary

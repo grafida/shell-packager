@@ -62,6 +62,8 @@ final class TarWriterTest extends TestCase
         }
     }
 
+    // The tarball is a Linux package: Windows' own tar (bsdtar) is not a reader it is made for.
+    #[\PHPUnit\Framework\Attributes\RequiresOperatingSystem('^(?!WIN)')]
     public function testTheSystemTarReadsIt(): void
     {
         $long = $this->write($this->dir . '/a.tar.gz');

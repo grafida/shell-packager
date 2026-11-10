@@ -197,6 +197,13 @@ final readonly class Authenticode
             throw new PackagerException("{$path}: the signature does not chain to {$caFile}:\n" . trim($text));
         }
 
-        return preg_match('/Signer #0:\s*\n\s*Subject:\s*(.+)/', $text, $subject) === 1 ? trim($subject[1]) : 'an unnamed signer';
+        if (preg_match('/Signer #0:\s*\n\s*Subject:\s*(.+)/', $text, $subject) !== 1) {
+            return 'an unnamed signer';
+        }
+
+        // Older osslsigncode (Ubuntu 22.04's) prints OpenSSL's one-line form, /CN=a/O=b.
+        $name = trim($subject[1]);
+
+        return str_starts_with($name, '/') ? implode(', ', explode('/', ltrim($name, '/'))) : $name;
     }
 }
