@@ -101,7 +101,8 @@ final class LinuxTarballTest extends TestCase
         self::assertSame(0, $code, implode("\n", $lines));
 
         $desktop = Filesystem::read($this->dir . '/data/applications/test.packager.app.desktop');
-        self::assertStringContainsString("Exec=\"{$where}/test-app/test-app\"\n", $desktop);
+        // install.sh writes the real path (macOS's temp dir is behind /var -> /private/var).
+        self::assertStringContainsString('Exec="' . realpath($where) . "/test-app/test-app\"\n", $desktop);
         self::assertStringContainsString("Exec=whatever --new\n", $desktop, 'only the main Exec is rewritten');
         self::assertFileExists($this->dir . '/data/icons/hicolor/48x48/apps/test.packager.app.png');
 

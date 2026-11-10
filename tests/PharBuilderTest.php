@@ -59,7 +59,8 @@ final class PharBuilderTest extends TestCase
 
         foreach (new \RecursiveIteratorIterator(new \Phar($this->dir . '/bare.phar')) as $file) {
             /** @var \PharFileInfo $file */
-            $names[] = substr($file->getPathname(), \strlen('phar://' . $this->dir . '/bare.phar/'));
+            // The real path: macOS's temp dir is behind a symlink (/var -> /private/var).
+            $names[] = substr($file->getPathname(), \strlen('phar://' . realpath($this->dir) . '/bare.phar/'));
         }
 
         sort($names);

@@ -25,16 +25,44 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   reads the lock's `dist.url`.
 - **The ini block is checked by running it** (`Phar\WorkerCheck`): phpmicro ignores a malformed
   block silently and then writes its bytes to stdout. The handshake check (protocol v1 `ready`) is
-  the app-agnostic proof that a payload boots. Both need a Linux host of the target architecture;
-  elsewhere they are skipped with a note, never faked.
+  the app-agnostic proof that a payload boots. Both need a host of the target's OS and architecture
+  (Linux, or an arm64 Mac); elsewhere they are skipped with a note, never faked. On macOS the
+  handshake runs on the **signed stub inside the finished bundle** (`handshakeAt`), under the
+  hardened runtime with the entitlements it was given: that is the test any entitlement must fail
+  without before it is kept (grafida/grafida#88).
+- **macOS (`src/Macos/`) is arm64 only.** `MachO` reads, in PHP, each binary's CPU, its minimum
+  macOS (`LC_BUILD_VERSION`) and where its image ends; a file longer than its last segment is an SFX
+  with its payload still appended, which is refused (signing it corrupts the PHAR). Both real pins
+  end exactly at their last segment; `MachOTest` checks that on CI. `LSMinimumSystemVersion` is
+  `InfoPlist::MINIMUM_SYSTEM_VERSION` (12.0, the shell's floor) and every binary's minos must be
+  within it. `Info.plist` keys the packager computes are an error in `macos.infoPlist`.
+- **Signing identity and notary profile come from the environment** (`MACOS_SIGN_IDENTITY`,
+  `MACOS_NOTARY_PROFILE`), never an app's repository. Without the identity everything is signed ad
+  hoc, but **always with the hardened runtime**, so a local build behaves like the notarised one.
+  Inside-out: the stub, the shell, then the bundle, whose signature re-signs the main executable and
+  must therefore carry the shell's entitlements too. Each signature is verified and read back
+  (`codesign -d --entitlements - --xml`): exactly the configured entitlements, hardened runtime set.
+- **The DMG's Finder layout is best-effort and must never hang or touch another volume**:
+  `osascript` runs under a time limit (an unanswered Automation prompt blocks forever), and only a
+  volume mounted at exactly `/Volumes/<volumeName>` is styled. The volume icon goes on after the
+  layout (Finder deletes one that is there when it opens the window). `hdiutil attach`/`detach`
+  print a deprecation warning on newer macOS; `diskutil image` does not exist on 12, so they stay.
+- **`runtimes` is grouped by platform** (`linux`, `macos`); a flat one is Linux's, and a mix is an
+  error. Grafida's configuration used the flat shape.
 - **Determinism:** sorted PHAR entries, `seld/phar-utils` timestamps, `SOURCE_DATE_EPOCH`, and our
   own `Archive\TarWriter` (ustar, uid/gid 0, fixed mtime, streamed gzip). PharData cannot set modes
   and times, and BSD tar on macOS has no `--sort`/`--mtime`, while Linux packages are also built on
   macOS.
 - **The fixture app (`tests/fixtures/app`) carries a minimal, independent protocol v1 worker** (its
   `bin/worker.php`), and its `shell-package.json` pins the **real** shell and SFX releases.
-  `scripts/e2e-linux.sh` packages it, installs it and runs it headless (CI does, on both arches).
-  Bump those pins when a new shell or SFX should be covered.
+  `scripts/e2e-linux.sh` packages it, installs it and runs it headless (CI does, on both arches);
+  `scripts/e2e-macos.sh` builds its DMG, mounts it, copies the app out and launches it **through
+  LaunchServices** (`open`), which is the only thing that reads `Info.plist` (CI does, on macos-15,
+  with `--no-style`). Bump those pins when a new shell or SFX should be covered. The macOS tests need
+  `SHELL_PACKAGER_TEST_MACOS_SHELL` and `_SFX` (CI fetches the pins with `fetch --platform=macos`).
+- **Every Linux change is checked byte for byte**: with a fixed `SOURCE_DATE_EPOCH`, the fixture's
+  tarball before and after must have the same SHA-256 (done for the 0.2.0 refactor, on the 0.1.0
+  pins, before they were bumped).
 - Every PHP file uses the MIT docblock; PHPStan level max + strict rules (`composer linter:check`)
   and the suite (`composer test`) must pass, as must `shellcheck` on `scripts/` and `resources/`.
 

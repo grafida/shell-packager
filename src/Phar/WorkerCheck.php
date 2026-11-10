@@ -14,9 +14,11 @@ namespace Grafida\ShellPackager\Phar;
 use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
+use Grafida\ShellPackager\Platform;
 
 /**
- * Runs the packaged worker before it ships, when this machine can (Linux, same architecture):
+ * Runs the packaged worker before it ships, when this machine can (the target's OS and
+ * architecture: Linux, or an arm64 Mac):
  *
  * - **the ini probe:** a tiny PHAR behind the same extra-INI block, on the same stub, reports
  *   `ini_get()` for every key; each must be what was asked for. This is what catches a block
@@ -26,15 +28,22 @@ use Grafida\ShellPackager\PackagerException;
  *   any app; it proves the PHAR, its autoloader and the app's bootstrap all load from `phar://`.
  *
  * Both run in a throwaway directory with every per-user directory pointed into it, so the worker
- * never touches the real user's data.
+ * never touches the real user's data. On macOS the handshake also runs in place, on the signed stub
+ * inside the finished bundle ({@see handshakeAt()}): that proves the stub finds its `.phar` in
+ * `../Resources` and runs under the hardened runtime with the entitlements it was given.
  */
 final class WorkerCheck
 {
     private const READY_TIMEOUT = 30.0;
 
-    public static function canRun(Arch $arch): bool
+    public static function canRun(Arch $arch, Platform $platform = Platform::Linux): bool
     {
-        return \PHP_OS_FAMILY === 'Linux' && Arch::host() === $arch;
+        $os = match ($platform) {
+            Platform::Linux => 'Linux',
+            Platform::Macos => 'Darwin',
+        };
+
+        return \PHP_OS_FAMILY === $os && Arch::host() === $arch;
     }
 
     /** @param array<string, bool|int|float|string> $ini */
@@ -91,84 +100,105 @@ final class WorkerCheck
             chmod($work . '/' . $name, 0o755);
             copy($payload, $work . '/' . $name . '.phar');
 
-            $process = proc_open(
-                [$work . '/' . $name],
-                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $work . '/stderr', 'w']],
-                $pipes,
-                $work,
-                self::isolatedEnv($work)
-            );
-
-            if (!\is_resource($process)) {
-                throw new PackagerException('Cannot start the packaged worker.');
-            }
-
-            stream_set_blocking($pipes[1], false);
-            $buffer   = '';
-            $deadline = microtime(true) + self::READY_TIMEOUT;
-            $header   = null;
-
-            while (microtime(true) < $deadline) {
-                $read   = [$pipes[1]];
-                $write  = null;
-                $except = null;
-
-                if (stream_select($read, $write, $except, 0, 200000) > 0) {
-                    $chunk = fread($pipes[1], 65536);
-
-                    if ($chunk === '' && feof($pipes[1])) {
-                        break;
-                    }
-
-                    $buffer .= (string) $chunk;
-                }
-
-                if (\strlen($buffer) >= 8) {
-                    if (!str_starts_with($buffer, 'GSF1')) {
-                        break;
-                    }
-
-                    /** @var array{1: int} $length */
-                    $length = unpack('V', substr($buffer, 4, 4));
-
-                    if (\strlen($buffer) >= 8 + $length[1]) {
-                        $header = substr($buffer, 8, $length[1]);
-
-                        break;
-                    }
-                }
-            }
-
-            fclose($pipes[0]);
-            // Drain stdout while waiting, so a worker that writes on its way out cannot block.
-            $exited = self::waitExit($process, 10.0, $pipes[1]);
-            fclose($pipes[1]);
-            $exited ? proc_close($process) : self::kill($process);
-            $stderr = is_file($work . '/stderr') ? Filesystem::read($work . '/stderr') : '';
-            $tail   = implode("\n", \array_slice(explode("\n", trim($stderr)), -20));
-
-            if ($header === null) {
-                throw new PackagerException(
-                    "The packaged worker sent no ready frame within " . self::READY_TIMEOUT . " s.\n"
-                    . ($buffer !== '' ? 'stdout began with: ' . json_encode(substr($buffer, 0, 80)) . "\n" : '')
-                    . "stderr:\n" . $tail
-                );
-            }
-
-            $decoded = json_decode($header, true);
-
-            if (!\is_array($decoded) || ($decoded['type'] ?? null) !== 'ready' || ($decoded['protocol'] ?? null) !== 1) {
-                throw new PackagerException("The packaged worker's first frame is not a protocol 1 ready: {$header}");
-            }
-
-            if (!$exited) {
-                throw new PackagerException("The packaged worker did not exit within 10 s of its stdin closing.\nstderr:\n{$tail}");
-            }
-
-            return $header;
+            return self::talk($work . '/' . $name, $work);
         } finally {
             Filesystem::remove($work);
         }
+    }
+
+    /**
+     * Starts the worker stub at $executable where it is (in a bundle: `Contents/MacOS/<worker>`, its
+     * payload in `Contents/Resources`) and waits for `ready`; returns its header. It runs in a
+     * throwaway working directory with the per-user directories pointed into it.
+     */
+    public static function handshakeAt(string $executable): string
+    {
+        $work = Filesystem::tempDir('handshake');
+
+        try {
+            return self::talk($executable, $work);
+        } finally {
+            Filesystem::remove($work);
+        }
+    }
+
+    private static function talk(string $executable, string $work): string
+    {
+        $process = proc_open(
+            [$executable],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $work . '/stderr', 'w']],
+            $pipes,
+            $work,
+            self::isolatedEnv($work)
+        );
+
+        if (!\is_resource($process)) {
+            throw new PackagerException('Cannot start the packaged worker.');
+        }
+
+        stream_set_blocking($pipes[1], false);
+        $buffer   = '';
+        $deadline = microtime(true) + self::READY_TIMEOUT;
+        $header   = null;
+
+        while (microtime(true) < $deadline) {
+            $read   = [$pipes[1]];
+            $write  = null;
+            $except = null;
+
+            if (stream_select($read, $write, $except, 0, 200000) > 0) {
+                $chunk = fread($pipes[1], 65536);
+
+                if ($chunk === '' && feof($pipes[1])) {
+                    break;
+                }
+
+                $buffer .= (string) $chunk;
+            }
+
+            if (\strlen($buffer) >= 8) {
+                if (!str_starts_with($buffer, 'GSF1')) {
+                    break;
+                }
+
+                /** @var array{1: int} $length */
+                $length = unpack('V', substr($buffer, 4, 4));
+
+                if (\strlen($buffer) >= 8 + $length[1]) {
+                    $header = substr($buffer, 8, $length[1]);
+
+                    break;
+                }
+            }
+        }
+
+        fclose($pipes[0]);
+        // Drain stdout while waiting, so a worker that writes on its way out cannot block.
+        $exited = self::waitExit($process, 10.0, $pipes[1]);
+        fclose($pipes[1]);
+        $exited ? proc_close($process) : self::kill($process);
+        $stderr = is_file($work . '/stderr') ? Filesystem::read($work . '/stderr') : '';
+        $tail   = implode("\n", \array_slice(explode("\n", trim($stderr)), -20));
+
+        if ($header === null) {
+            throw new PackagerException(
+                "The packaged worker sent no ready frame within " . self::READY_TIMEOUT . " s.\n"
+                . ($buffer !== '' ? 'stdout began with: ' . json_encode(substr($buffer, 0, 80)) . "\n" : '')
+                . "stderr:\n" . $tail
+            );
+        }
+
+        $decoded = json_decode($header, true);
+
+        if (!\is_array($decoded) || ($decoded['type'] ?? null) !== 'ready' || ($decoded['protocol'] ?? null) !== 1) {
+            throw new PackagerException("The packaged worker's first frame is not a protocol 1 ready: {$header}");
+        }
+
+        if (!$exited) {
+            throw new PackagerException("The packaged worker did not exit within 10 s of its stdin closing.\nstderr:\n{$tail}");
+        }
+
+        return $header;
     }
 
     private static function sameIni(bool|int|float|string $expected, mixed $actual): bool
@@ -245,6 +275,8 @@ final class WorkerCheck
             'XDG_CONFIG_HOME' => $dir . '/home/config',
             'XDG_CACHE_HOME'  => $dir . '/home/cache',
             'XDG_STATE_HOME'  => $dir . '/home/state',
+            // Foundation's idea of the home directory, which ignores HOME (macOS).
+            'CFFIXED_USER_HOME' => $dir . '/home',
             'LANG'            => 'C.UTF-8',
         ];
     }

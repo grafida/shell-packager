@@ -1,3 +1,13 @@
+shell-packager 0.2.0
+================================================================================
++ `macos-app`: an arm64 app bundle with a generated `Info.plist`, signed inside-out with the hardened runtime
++ `macos-dmg`: a disk image with the app and an `/Applications` link; Finder layout, volume icon, notarisation
++ `runtimes` grouped by platform (`linux`, `macos`); a flat `runtimes` still means Linux
++ The bundle's binaries are checked: arm64, minimum macOS within 12.0, and no payload appended to the stub
++ The packaged macOS worker is run inside the signed bundle before the image is written
++ macOS end-to-end test: the fixture app's image mounted, copied out and launched through LaunchServices
+~ `composer test` turns `phar.readonly` off itself
+
 shell-packager 0.1.0
 ================================================================================
 + Repository skeleton: CLI entry point, CI, licence

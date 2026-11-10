@@ -37,7 +37,7 @@ final class ConfigTest extends TestCase
 
     public function testAMissingRuntimeIsNamed(): void
     {
-        $this->expectExceptionMessage("pins no 'shell' runtime");
+        $this->expectExceptionMessage("pins no linux 'shell' runtime (runtimes.linux.shell)");
         Fixture::config()->runtime('shell');
     }
 

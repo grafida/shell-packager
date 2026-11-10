@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager;
 
+use Grafida\ShellPackager\Macos\MacosConfig;
+
 /**
  * An app's packaging configuration (a JSON file in the app, conventionally `shell-package.json`).
  * Every path in it is relative to the file's own directory, the app root. Everything a package is
@@ -30,9 +32,15 @@ namespace Grafida\ShellPackager;
  *     "ini": {"memory_limit": "512M", "opcache.enable": false}
  *   },
  *   "runtimes": {
- *     "shell":    {"url": "https://…/0.1.0/grafida-shell-linux-{arch}",    "sha256": {"x86_64": "…", "aarch64": "…"}},
- *     "launcher": {"url": "https://…/0.1.0/grafida-launcher-linux-{arch}", "sha256": {…}},
- *     "sfx":      {"url": "https://…/sfx-…/linux-{arch}.standard.sfx",     "sha256": {…}}
+ *     "linux": {
+ *       "shell":    {"url": "https://…/0.2.0/grafida-shell-linux-{arch}",    "sha256": {"x86_64": "…", "aarch64": "…"}},
+ *       "launcher": {"url": "https://…/0.2.0/grafida-launcher-linux-{arch}", "sha256": {…}},
+ *       "sfx":      {"url": "https://…/sfx-…/linux-{arch}.standard.sfx",     "sha256": {…}}
+ *     },
+ *     "macos": {
+ *       "shell": {"url": "https://…/0.2.0/grafida-shell-macos-arm64",         "sha256": {"aarch64": "…"}},
+ *       "sfx":   {"url": "https://…/sfx-…/macos-aarch64.standard.sfx",        "sha256": {"aarch64": "…"}}
+ *     }
  *   },
  *   "linux": {
  *     "name": "grafida",
@@ -40,9 +48,13 @@ namespace Grafida\ShellPackager;
  *     "icons": {"48": "assets/logo/png/grafida-48.png", "512": "…"},
  *     "files": {"LICENSE.txt": "LICENSE.txt"},
  *     "output": "build/dist/Grafida-{version}-linux-{debarch}-shell-preview.tar.gz"
- *   }
+ *   },
+ *   "macos": {…}    // see Macos\MacosConfig
  * }
  * ```
+ *
+ * `runtimes` is grouped by platform. A flat `runtimes` (names straight under it, as before
+ * macOS) still means Linux; mixing the two shapes is an error, never a half-read configuration.
  *
  * Under `vendor`, `include` reads the `--no-dev` staging install, never the app's own `vendor/`.
  */
@@ -51,7 +63,7 @@ final readonly class Config
     /**
      * @param array<string, bool|int|float|string>                    $ini
      * @param list<IncludeRule>                                       $include
-     * @param array<string, Runtime>                                  $runtimes
+     * @param array<string, array<string, Runtime>>                   $runtimes platform => name => pin
      * @param array<int, string>                                      $icons   size => absolute path
      * @param array<string, string>                                   $files   name in the package => absolute path
      */
@@ -70,6 +82,7 @@ final readonly class Config
         public array $icons,
         public array $files,
         public string $linuxOutput,
+        public ?MacosConfig $macos = null,
     ) {
     }
 
@@ -109,15 +122,7 @@ final readonly class Config
             $ini[(string) $key] = $value;
         }
 
-        $runtimes = [];
-
-        foreach (self::optionalObject($data, 'runtimes') as $name => $runtime) {
-            if (!\is_array($runtime)) {
-                throw new PackagerException("runtimes.{$name} must be an object.");
-            }
-
-            $runtimes[(string) $name] = Runtime::fromArray((string) $name, $runtime);
-        }
+        $runtimes = self::runtimes(self::optionalObject($data, 'runtimes'));
 
         $linux = self::optionalObject($data, 'linux');
         $icons = [];
@@ -159,13 +164,153 @@ final readonly class Config
             icons: $icons,
             files: $files,
             linuxOutput: self::string($linux, 'output', 'build/dist/{name}-{version}-linux-{arch}.tar.gz', 'linux'),
+            macos: isset($data['macos']) ? self::parseMacos($root, self::object($data, 'macos', $real), self::string($manifest, 'title', null, $manifestPath)) : null,
         );
     }
 
-    public function runtime(string $name): Runtime
+    public function runtime(string $name, Platform $platform = Platform::Linux): Runtime
     {
-        return $this->runtimes[$name]
-            ?? throw new PackagerException("The packaging configuration pins no '{$name}' runtime (runtimes.{$name}).");
+        return $this->runtimes[$platform->value][$name]
+            ?? throw new PackagerException("The packaging configuration pins no {$platform->value} '{$name}' runtime (runtimes.{$platform->value}.{$name}).");
+    }
+
+    public function macos(): MacosConfig
+    {
+        return $this->macos ?? throw new PackagerException("The packaging configuration has no 'macos' section.");
+    }
+
+    /**
+     * `runtimes`, grouped by platform; a flat one is Linux's.
+     *
+     * @param array<mixed> $raw
+     * @return array<string, array<string, Runtime>>
+     */
+    private static function runtimes(array $raw): array
+    {
+        $platforms = array_map(static fn (Platform $p): string => $p->value, Platform::cases());
+        $grouped   = [];
+        $flat      = [];
+
+        foreach ($raw as $key => $value) {
+            if (!\is_array($value)) {
+                throw new PackagerException("runtimes.{$key} must be an object.");
+            }
+
+            if (\in_array((string) $key, $platforms, true) && !\array_key_exists('url', $value)) {
+                $grouped[(string) $key] = $value;
+            } else {
+                $flat[(string) $key] = $value;
+            }
+        }
+
+        if ($grouped !== [] && $flat !== []) {
+            throw new PackagerException(
+                'runtimes mixes platform groups (' . implode(', ', array_keys($grouped)) . ') with ungrouped pins ('
+                . implode(', ', array_keys($flat)) . '): put every pin under its platform.'
+            );
+        }
+
+        $out = [];
+
+        foreach ($grouped === [] ? [Platform::Linux->value => $flat] : $grouped as $platform => $pins) {
+            foreach ($pins as $name => $runtime) {
+                if (!\is_array($runtime)) {
+                    throw new PackagerException("runtimes.{$platform}.{$name} must be an object.");
+                }
+
+                $out[$platform][(string) $name] = Runtime::fromArray((string) $name, $runtime);
+            }
+        }
+
+        return $out;
+    }
+
+    /** @param array<mixed> $macos */
+    private static function parseMacos(string $root, array $macos, string $title): MacosConfig
+    {
+        $name = self::string($macos, 'name', $title, 'macos');
+
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/', $name) !== 1 || str_ends_with($name, '.app')) {
+            throw new PackagerException("macos.name '{$name}' must be a plain file name (letters, digits, space, . _ -), without .app.");
+        }
+
+        $entitlements = ['shell' => null, 'worker' => null];
+
+        foreach (self::optionalObject($macos, 'entitlements') as $binary => $file) {
+            if (!\array_key_exists((string) $binary, $entitlements) || !\is_string($file)) {
+                throw new PackagerException("macos.entitlements maps 'shell' and/or 'worker' to a .plist; got '{$binary}'.");
+            }
+
+            $entitlements[(string) $binary] = self::path($root, $file, "macos.entitlements.{$binary}");
+        }
+
+        $resources = [];
+
+        foreach (self::optionalObject($macos, 'resources') as $file => $source) {
+            if (!\is_string($source) || str_contains((string) $file, '..') || str_starts_with((string) $file, '/')) {
+                throw new PackagerException("macos.resources maps a name in Contents/Resources to a file; got '{$file}'.");
+            }
+
+            $resources[(string) $file] = self::path($root, $source, "macos.resources.{$file}");
+        }
+
+        $infoPlist = [];
+
+        foreach (self::optionalObject($macos, 'infoPlist') as $key => $value) {
+            $infoPlist[(string) $key] = $value;
+        }
+
+        $dmg       = self::optionalObject($macos, 'dmg');
+        $positions = self::optionalObject($dmg, 'positions');
+        $optional  = static fn (array $data, string $key, string $what): ?string => isset($data[$key])
+            ? self::path($root, self::string($data, $key, null, $what), "{$what}.{$key}")
+            : null;
+
+        return new MacosConfig(
+            name: $name,
+            icon: $optional($macos, 'icon', 'macos'),
+            infoPlist: $infoPlist,
+            entitlements: $entitlements,
+            resources: $resources,
+            dmgBackground: $optional($dmg, 'background', 'macos.dmg'),
+            window: self::pair($dmg, 'window', [640, 400], 'macos.dmg'),
+            iconSize: self::int($dmg, 'iconSize', 128, 'macos.dmg'),
+            textSize: self::int($dmg, 'textSize', 13, 'macos.dmg'),
+            appPosition: self::pair($positions, 'app', [160, 210], 'macos.dmg.positions'),
+            applicationsPosition: self::pair($positions, 'applications', [480, 210], 'macos.dmg.positions'),
+            volumeIcon: $optional($dmg, 'volumeIcon', 'macos.dmg'),
+            volumeName: self::string($dmg, 'volumeName', $name, 'macos.dmg'),
+            appOutput: self::string($macos, 'app', 'build/shell-macos/{name}.app', 'macos'),
+            dmgOutput: self::string($macos, 'output', 'build/dist/{name}-{version}-macos-{debarch}.dmg', 'macos'),
+        );
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @param array{int, int} $default
+     * @return array{int, int}
+     */
+    private static function pair(array $data, string $key, array $default, string $where): array
+    {
+        $value = $data[$key] ?? $default;
+
+        if (!\is_array($value) || !array_is_list($value) || \count($value) !== 2 || !\is_int($value[0]) || !\is_int($value[1]) || $value[0] < 0 || $value[1] < 0) {
+            throw new PackagerException("{$where}: '{$key}' must be two non-negative integers.");
+        }
+
+        return [$value[0], $value[1]];
+    }
+
+    /** @param array<mixed> $data */
+    private static function int(array $data, string $key, int $default, string $where): int
+    {
+        $value = $data[$key] ?? $default;
+
+        if (!\is_int($value) || $value <= 0) {
+            throw new PackagerException("{$where}: '{$key}' must be a positive integer.");
+        }
+
+        return $value;
     }
 
     /** @return array<mixed> */

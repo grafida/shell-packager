@@ -37,7 +37,7 @@
         "bin/shell-packager"
     ],
     "scripts": {
-        "test": "phpunit",
+        "test": "@php -d phar.readonly=0 vendor/bin/phpunit",
         "linter:check": "phpstan analyse --memory-limit=1G"
     },
     "config": {

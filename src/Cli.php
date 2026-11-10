@@ -12,35 +12,48 @@ declare(strict_types=1);
 namespace Grafida\ShellPackager;
 
 use Grafida\ShellPackager\Linux\LinuxTarball;
+use Grafida\ShellPackager\Macos\Codesign;
+use Grafida\ShellPackager\Macos\MacApp;
+use Grafida\ShellPackager\Macos\MacDmg;
 use Grafida\ShellPackager\Phar\PharBuilder;
 use Grafida\ShellPackager\Phar\WorkerCheck;
 
 /** `bin/shell-packager`: argument parsing and the commands. */
 final class Cli
 {
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.2.0';
 
     public const USAGE = <<<'TXT'
-        shell-packager 0.1.0: packaging for apps on the Grafida desktop shell
+        shell-packager 0.2.0: packaging for apps on the Grafida desktop shell
 
         Usage:
           shell-packager linux-tarball --config=FILE --arch=ARCH --app-version=VERSION [options]
+          shell-packager macos-app --config=FILE --app-version=VERSION [options]
+          shell-packager macos-dmg --config=FILE --app-version=VERSION [--app=APP] [--no-style] [options]
           shell-packager phar --config=FILE --output=FILE [--no-check]
-          shell-packager fetch --config=FILE --arch=ARCH [--local=NAME=PATH]…
+          shell-packager fetch --config=FILE --arch=ARCH [--platform=linux|macos] [--local=NAME=PATH]…
           shell-packager version | help
 
         Options:
           --config=FILE        the app's packaging configuration (shell-package.json)
-          --arch=ARCH          x86_64 or aarch64 (amd64/arm64 accepted)
-          --app-version=V      the app's version, for the output file name
-          --output=FILE        where to write (linux-tarball: overrides linux.output)
+          --arch=ARCH          x86_64 or aarch64 (amd64/arm64 accepted); macOS is aarch64 only
+          --app-version=V      the app's version (macOS: one to three dot-separated integers)
+          --output=FILE        where to write (overrides linux.output, macos.app or macos.output)
+          --app=APP            macos-dmg: image this signed bundle instead of building one
+          --no-style           macos-dmg: no Finder layout (it needs Finder and its Automation
+                               permission; a CI runner has neither)
           --local=NAME=PATH    use a local file for runtime NAME (shell, launcher, sfx). UNPINNED:
                                for testing an unreleased build only; announced on every use
-          --no-check           skip running the packaged worker (it only runs on a Linux host of
-                               the same architecture anyway)
+          --no-check           skip running the packaged worker (it runs only on a host of the
+                               target's OS and architecture anyway)
 
-        Timestamps come from SOURCE_DATE_EPOCH when it is set. Downloads are cached by SHA-256 in
-        SHELL_PACKAGER_CACHE (default: $XDG_CACHE_HOME/grafida-shell-packager).
+        macOS signing comes from the environment, never the configuration: MACOS_SIGN_IDENTITY (a
+        Developer ID Application identity; without it, ad hoc) and MACOS_NOTARY_PROFILE (a
+        notarytool keychain profile; needs the identity). Every binary gets the hardened runtime.
+
+        Timestamps come from SOURCE_DATE_EPOCH when it is set (Linux output is byte-reproducible;
+        macOS output is not). Downloads are cached by SHA-256 in SHELL_PACKAGER_CACHE (default:
+        $XDG_CACHE_HOME/grafida-shell-packager).
         TXT;
 
     /** @param list<string> $argv */
@@ -53,6 +66,8 @@ final class Cli
 
             return match ($command) {
                 'linux-tarball' => self::linuxTarball($options),
+                'macos-app'     => self::macosApp($options),
+                'macos-dmg'     => self::macosDmg($options),
                 'phar'          => self::phar($options),
                 'fetch'         => self::fetch($options),
                 'version', '--version' => self::say('shell-packager ' . self::VERSION),
@@ -104,6 +119,104 @@ final class Cli
     }
 
     /** @param array<string, list<string>> $options */
+    private static function macosApp(array $options): int
+    {
+        $config = Config::load(self::one($options, 'config'));
+        $app    = isset($options['output']) ? self::one($options, 'output') : MacApp::outputPath($config);
+        self::buildApp($config, $options, $app);
+        self::say("Done: {$app}");
+
+        return 0;
+    }
+
+    /** @param array<string, list<string>> $options */
+    private static function macosDmg(array $options): int
+    {
+        $config   = Config::load(self::one($options, 'config'));
+        $version  = self::one($options, 'app-version');
+        $output   = isset($options['output']) ? self::one($options, 'output') : MacDmg::outputPath($config, $version);
+        $codesign = Codesign::fromEnvironment();
+        $work     = null;
+
+        if (isset($options['app'])) {
+            $app = self::one($options, 'app');
+
+            if (!is_dir($app . '/Contents')) {
+                throw new PackagerException("--app={$app} is not an app bundle.");
+            }
+
+            Codesign::verify($app);
+        } else {
+            $work = Filesystem::tempDir('macos-app');
+            $app  = $work . '/' . $config->macos()->name . '.app';
+            self::buildApp($config, $options, $app);
+        }
+
+        try {
+            MacDmg::build($config, $app, $output, $codesign, !isset($options['no-style']), self::log(...));
+        } finally {
+            if ($work !== null) {
+                Filesystem::remove($work);
+            }
+        }
+
+        self::say("Done: {$output} (" . Filesystem::size((int) filesize($output)) . ')');
+
+        return 0;
+    }
+
+    /**
+     * Fetches, assembles, signs and checks a bundle at $app.
+     *
+     * @param array<string, list<string>> $options
+     */
+    private static function buildApp(Config $config, array $options, string $app): void
+    {
+        $version = self::one($options, 'app-version');
+        $arch    = isset($options['arch']) ? Arch::parse(self::one($options, 'arch')) : Arch::Aarch64;
+
+        if ($arch !== Arch::Aarch64) {
+            throw new PackagerException('macOS packages are arm64 (aarch64) only.');
+        }
+
+        $config->macos();
+        $codesign = Codesign::fromEnvironment();
+        $fetcher  = self::fetcher($options);
+        $runtimes = [];
+
+        foreach (['shell', 'sfx'] as $name) {
+            $runtimes[$name] = $fetcher->fetch($config->runtime($name, Platform::Macos), $arch);
+            self::say("{$name}: {$runtimes[$name]}");
+        }
+
+        $work = Filesystem::tempDir('macos');
+
+        try {
+            $payload = $work . '/' . $config->workerBinary . '.phar';
+            (new PharBuilder(self::log(...)))->build($config, $payload, self::timestamp());
+
+            $check = !isset($options['no-check']) && WorkerCheck::canRun($arch, Platform::Macos);
+
+            if ($check) {
+                WorkerCheck::iniProbe($runtimes['sfx'], $config->ini);
+            }
+
+            MacApp::assemble($config, $runtimes, $payload, $app, $version);
+            self::say('Signing (' . $codesign->describe() . ', hardened runtime)');
+            MacApp::sign($config, $app, $codesign);
+
+            if ($check) {
+                $header = WorkerCheck::handshakeAt("{$app}/Contents/MacOS/{$config->workerBinary}");
+                self::say('Worker check: the ini block applies, and the signed worker in the bundle answered ' . $header);
+            } else {
+                self::say('Worker check skipped' . (isset($options['no-check']) ? '.' : ': it runs only on an arm64 Mac.'));
+            }
+        } finally {
+            Filesystem::remove($work);
+        }
+    }
+
+    /** @param array<string, list<string>> $options */
     private static function phar(array $options): int
     {
         $config = Config::load(self::one($options, 'config'));
@@ -118,10 +231,13 @@ final class Cli
     private static function fetch(array $options): int
     {
         $config  = Config::load(self::one($options, 'config'));
-        $arch    = Arch::parse(self::one($options, 'arch'));
-        $fetcher = self::fetcher($options);
+        $arch     = Arch::parse(self::one($options, 'arch'));
+        $platform = isset($options['platform'])
+            ? (Platform::tryFrom(self::one($options, 'platform')) ?? throw new PackagerException('--platform is linux or macos.'))
+            : Platform::Linux;
+        $fetcher  = self::fetcher($options);
 
-        foreach ($config->runtimes as $runtime) {
+        foreach ($config->runtimes[$platform->value] ?? [] as $runtime) {
             self::say("{$runtime->name}: " . $fetcher->fetch($runtime, $arch));
         }
 
@@ -183,7 +299,7 @@ final class Cli
     private static function options(array $args): array
     {
         $options = [];
-        $flags   = ['no-check'];
+        $flags   = ['no-check', 'no-style'];
 
         for ($i = 0, $n = \count($args); $i < $n; $i++) {
             if (!str_starts_with($args[$i], '--')) {

@@ -16,12 +16,14 @@ use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
 use Grafida\ShellPackager\Phar\PharBuilder;
 use Grafida\ShellPackager\Phar\WorkerCheck;
+use Grafida\ShellPackager\Platform;
 use PHPUnit\Framework\Attributes\RequiresSetting;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Against a real Linux phpmicro sibling-phar SFX, named by SHELL_PACKAGER_TEST_SFX (CI downloads
- * the pinned one); skipped without it.
+ * Against a real phpmicro sibling-phar SFX for this machine: a Linux one named by
+ * SHELL_PACKAGER_TEST_SFX, or on an arm64 Mac a macOS one named by SHELL_PACKAGER_TEST_MACOS_SFX
+ * (CI downloads the pinned ones); skipped without it.
  */
 #[RequiresSetting('phar.readonly', '0')]
 final class WorkerCheckTest extends TestCase
@@ -30,11 +32,13 @@ final class WorkerCheckTest extends TestCase
 
     protected function setUp(): void
     {
-        $sfx = getenv('SHELL_PACKAGER_TEST_SFX');
-        $arch = Arch::host();
+        $platform = \PHP_OS_FAMILY === 'Darwin' ? Platform::Macos : Platform::Linux;
+        $env      = $platform === Platform::Macos ? 'SHELL_PACKAGER_TEST_MACOS_SFX' : 'SHELL_PACKAGER_TEST_SFX';
+        $sfx      = getenv($env);
+        $arch     = Arch::host();
 
-        if (!\is_string($sfx) || !is_file($sfx) || $arch === null || !WorkerCheck::canRun($arch)) {
-            self::markTestSkipped('Set SHELL_PACKAGER_TEST_SFX to a Linux sibling-phar micro.sfx for this machine.');
+        if (!\is_string($sfx) || !is_file($sfx) || $arch === null || !WorkerCheck::canRun($arch, $platform)) {
+            self::markTestSkipped("Set {$env} to a {$platform->value} sibling-phar micro.sfx for this machine.");
         }
 
         $this->sfx = $sfx;

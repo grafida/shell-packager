@@ -69,3 +69,40 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0 xvfb dbus
       - run: composer install --no-interaction --no-progress
       - run: scripts/e2e-linux.sh
+
+  # The suite on an arm64 Mac, with the pinned macOS shell and SFX: the Mach-O checks on the real
+  # bytes, signing ad hoc with the hardened runtime, the signatures read back, the worker answering
+  # from inside the signed bundle, and the image.
+  test-macos:
+    name: Tests (macos-15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          ini-values: phar.readonly=0
+      - run: composer install --no-interaction --no-progress
+      - name: Fetch the pinned macOS runtimes
+        run: |
+          out="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch=aarch64 --platform=macos)"
+          echo "$out"
+          echo "SHELL_PACKAGER_TEST_MACOS_SHELL=$(sed -n 's/^shell: //p' <<<"$out")" >> "$GITHUB_ENV"
+          echo "SHELL_PACKAGER_TEST_MACOS_SFX=$(sed -n 's/^sfx: //p' <<<"$out")" >> "$GITHUB_ENV"
+      - run: composer test
+
+  # A disk image of the fixture app, with the real pinned shell and SFX, mounted, copied out and
+  # launched through LaunchServices (scripts/e2e-macos.sh). No Finder layout: a runner cannot grant
+  # Finder's Automation permission.
+  e2e-macos:
+    name: End to end (macos-15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - run: composer install --no-interaction --no-progress
+      - run: scripts/e2e-macos.sh

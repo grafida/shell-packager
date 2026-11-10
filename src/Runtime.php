@@ -16,6 +16,9 @@ namespace Grafida\ShellPackager;
  * download it per architecture, and the SHA-256 it must have. The pin is the app's, committed in
  * its configuration; a hash published beside the download is never consulted, because that would
  * only detect corruption, not substitution.
+ *
+ * `{arch}` in the URL stands for the architecture (x86_64/aarch64). A URL without it names one file,
+ * for a platform with a single architecture (macOS: arm64 only).
  */
 final readonly class Runtime
 {
@@ -32,8 +35,8 @@ final readonly class Runtime
     {
         $url = $data['url'] ?? null;
 
-        if (!\is_string($url) || !str_contains($url, '{arch}')) {
-            throw new PackagerException("runtimes.{$name}.url must be a URL containing {arch}.");
+        if (!\is_string($url) || $url === '') {
+            throw new PackagerException("runtimes.{$name}.url must be a URL.");
         }
 
         $pins = $data['sha256'] ?? null;
