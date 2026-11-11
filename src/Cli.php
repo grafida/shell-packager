@@ -24,10 +24,10 @@ use Grafida\ShellPackager\Windows\WindowsTree;
 /** `bin/shell-packager`: argument parsing and the commands. */
 final class Cli
 {
-    public const VERSION = '0.3.0';
+    public const VERSION = '0.3.1';
 
     public const USAGE = <<<'TXT'
-        shell-packager 0.3.0: packaging for apps on the Grafida desktop shell
+        shell-packager 0.3.1: packaging for apps on the Grafida desktop shell
 
         Usage:
           shell-packager linux-tarball --config=FILE --arch=ARCH --app-version=VERSION [options]
