@@ -5,6 +5,7 @@ shell-packager 0.4.0
 + A runtime's `url` may name one URL per architecture
 ~ The macOS worker check runs an x86_64 worker on an arm64 Mac under Rosetta 2, and skips with a note without it
 ~ `macos-dmg --app=` refuses a bundle whose binaries are not of `--arch`
+# [LOW] `macos-dmg` failed now and then with "hdiutil: convert failed - Resource temporarily unavailable"
 
 shell-packager 0.3.1
 ================================================================================

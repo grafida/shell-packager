@@ -98,7 +98,7 @@ final class MacDmg
                 unlink($output);
             }
 
-            Process::mustRun(['hdiutil', 'convert', $image, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', $output]);
+            self::convert($image, $output, $log);
         } finally {
             Filesystem::remove($work);
         }
@@ -119,6 +119,44 @@ final class MacDmg
         }
 
         Filesystem::write($output . '.sha256', hash_file('sha256', $output) . '  ' . basename($output) . "\n");
+    }
+
+    /** How many times `hdiutil convert` is tried when the image is still held (see {@see convert()}). */
+    private const CONVERT_ATTEMPTS = 5;
+
+    /**
+     * Compresses the writable image into the read-only one.
+     *
+     * ⚠️ `hdiutil convert` can fail with "Resource temporarily unavailable" (EAGAIN) right after the
+     * writable image was detached: `diskimages-helper` (or Spotlight indexing the volume) still holds
+     * the file for a moment. Seen on GitHub's macOS runners, arm64 and Intel alike, about once in two
+     * runs (grafida/grafida#92). So exactly that error is retried, after a growing pause; any other
+     * failure, or the same one five times, is fatal as before.
+     *
+     * @param \Closure(string): void $log
+     */
+    private static function convert(string $image, string $output, \Closure $log): void
+    {
+        $command = ['hdiutil', 'convert', $image, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', $output];
+
+        for ($attempt = 1; ; $attempt++) {
+            [$code, $out, $err] = Process::run($command);
+
+            if ($code === 0) {
+                return;
+            }
+
+            if (is_file($output)) {
+                unlink($output);
+            }
+
+            if ($attempt >= self::CONVERT_ATTEMPTS || !str_contains($out . $err, 'Resource temporarily unavailable')) {
+                throw new PackagerException('hdiutil convert failed (' . $code . "):\n" . trim($err . "\n" . $out));
+            }
+
+            $log("hdiutil convert: the image is still in use; trying again ({$attempt}/" . (self::CONVERT_ATTEMPTS - 1) . ')');
+            sleep($attempt * 2);
+        }
     }
 
     /**
