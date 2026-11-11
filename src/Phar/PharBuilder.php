@@ -254,9 +254,10 @@ final class PharBuilder
         $phar = new \Phar($path, 0, $alias);
         $phar->startBuffering();
 
-        foreach ($files as $name => $source) {
-            $phar->addFile($source, $name);
-        }
+        // One call, never addFile() per file: in a buffered PHAR each addFile() still costs time
+        // that grows with the entries already added, so Grafida's 1,690 files took 25 s against
+        // 0.1 s, for the same entries in the same (sorted) order and the same bytes.
+        $phar->buildFromIterator(new \ArrayIterator($files));
 
         $comment = str_replace(['*/', "\n", "\r"], '', $title);
         $phar->setStub(<<<PHP
