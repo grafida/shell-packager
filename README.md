@@ -7,7 +7,7 @@ Build and packaging tooling for applications built on the
 [Grafida](https://github.com/grafida/grafida)'s own build scripts, and it knows nothing about any
 one app's layout: everything app-specific comes from the app's configuration and manifest.
 
-**Status:** Linux (tarball + per-user installer), macOS (arm64 bundle, signing, notarisation, DMG)
+**Status:** Linux (tarball + per-user installer), macOS (arm64 and x86_64 bundles, signing, notarisation, DMG)
 and Windows (x86_64 install tree, icon and version resources, Authenticode, an NSIS installer) work,
 as tracked in [grafida/grafida#82](https://github.com/grafida/grafida/issues/82). Every platform's
 package is built and signed on any host: the Mac builds all of them.
@@ -56,8 +56,10 @@ desktop entry and icons (and is the window's Wayland `app_id`), `title` appears 
       "sfx":      {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/linux-{arch}.standard.sfx",  "sha256": {"x86_64": "…", "aarch64": "…"}}
     },
     "macos": {
-      "shell": {"url": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-macos-arm64",       "sha256": {"aarch64": "…"}},
-      "sfx":   {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/macos-aarch64.standard.sfx",   "sha256": {"aarch64": "…"}}
+      "shell": {"url": {"aarch64": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-macos-arm64",
+                        "x86_64":  "https://github.com/grafida/shell/releases/download/0.4.0/grafida-shell-macos-x86_64"},
+                "sha256": {"aarch64": "…", "x86_64": "…"}},
+      "sfx":   {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/macos-{arch}.standard.sfx",     "sha256": {"aarch64": "…", "x86_64": "…"}}
     },
     "windows": {
       "shell": {"url": "https://github.com/grafida/shell/releases/download/0.3.0/grafida-shell-windows-x86_64.exe", "sha256": {"x86_64": "…"}},
@@ -104,16 +106,17 @@ desktop entry and icons (and is the window's Wayland `app_id`), `title` appears 
   text) at the front of the `.phar` file. It applies before any PHP runs, so it can set what
   `ini_set()` cannot.
 - **`runtimes`** are grouped by platform; a flat `runtimes` (the names straight under it) still
-  means Linux, and a mix of the two shapes is an error. A URL without `{arch}` names one file (macOS
-  is arm64 only). They are pinned by the app. A download whose SHA-256 is not the pinned one is fatal,
+  means Linux, and a mix of the two shapes is an error. A URL without `{arch}` names one file. When
+  the architectures come from different releases (an x86_64 pin added after the arm64 one was
+  verified), `url` maps each architecture to its own URL. They are pinned by the app. A download whose SHA-256 is not the pinned one is fatal,
   and so is an architecture with no pin. A hash published beside the download is never consulted.
   `--local NAME=PATH` substitutes a local file for testing an unreleased build; it is announced as
   UNPINNED every time.
 
 ## What is checked before a package is written
 
-On a machine of the target's OS and architecture (Linux, an arm64 Mac, or Windows x86_64), the
-packaged worker is run:
+On a machine of the target's OS and architecture (Linux, a Mac, or Windows x86_64; an x86_64 macOS
+worker also on an arm64 Mac with Rosetta 2, translated), the packaged worker is run:
 
 - **an ini probe:** the same block, on the same SFX, must read back every setting. phpmicro
   silently ignores a malformed block.
@@ -124,7 +127,8 @@ Both run with every per-user directory pointed at a temporary directory. On macO
 on the **signed** stub inside the finished bundle, so it also proves the stub finds its payload in
 `../Resources` and runs under the hardened runtime with the entitlements it was given. On Windows it
 runs on the signed stub in the finished tree, its resources rewritten and its signature appended.
-Elsewhere (a Windows package built on the Mac) it is skipped with a note, never faked.
+Elsewhere (a Windows package built on the Mac, an x86_64 bundle on an arm64 Mac without Rosetta 2)
+it is skipped with a note, never faked.
 
 ## The Linux tarball
 
@@ -140,6 +144,13 @@ myapp/
   install.sh             ./install.sh installs the desktop entry and icons for the current user
   …                      linux.files
 ```
+
+`linux.replaces` lists the desktop ids of an earlier build of the app installed under another id
+(`["myapp"]` for an app whose old packaging used `myapp.desktop`). Installing removes each one's
+`~/.local/share/applications/<id>.desktop` and its hicolor icons, but only when the entry exists and
+its `Exec` (field codes dropped, quotes removed) ends in `/<linux.name>`; an entry with that id that
+starts anything else is left alone, and `install.sh` says so. `--uninstall` removes only this
+build's own entry and icons.
 
 ⚠️ **The SFX stub and its `.phar` are two files and must stay two.** A stub with the payload
 appended cannot be code-signed: the signature lands past the PHAR and corrupts it. Linux does not
@@ -158,9 +169,12 @@ MyApp.app/Contents/
   Resources/…             macos.resources
 ```
 
-- **arm64 only.** Both binaries must be thin arm64 Mach-O files whose minimum macOS (read from
+- **One architecture per bundle**, `--arch=aarch64` (the default) or `--arch=x86_64` for Intel Macs.
+  Both binaries must be thin Mach-O files of that architecture whose minimum macOS (read from
   `LC_BUILD_VERSION`) is within the bundle's `LSMinimumSystemVersion`, 12.0: an `Info.plist` must
-  never offer the app to a Mac it cannot run on.
+  never offer the app to a Mac it cannot run on. `{arch}` (aarch64/x86_64) and `{debarch}`
+  (arm64/amd64) in `macos.app` and `macos.output` name each architecture's bundle and image, and
+  `macos-dmg --app=` refuses a bundle whose binaries are not of `--arch`.
 - **`Info.plist`** is generated. The packager computes the identifier (the manifest `id`), the
   names (`title`, `macos.name`), the version (`--app-version`, one to three integers), the icon
   and `LSMinimumSystemVersion`. Everything else comes from `macos.infoPlist`; a computed key there is

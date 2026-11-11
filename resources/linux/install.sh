@@ -8,6 +8,10 @@
 #
 # The app itself stays where the tarball was extracted. Run it again after moving the folder.
 #
+# REPLACES lists the desktop ids of an earlier build of this app installed under another id
+# (linux.replaces). Installing removes each one's entry and hicolor icons, but only when that entry
+# starts a program called NAME; anything else with that id is left alone, with a note.
+#
 #   ./install.sh               install (or refresh) the desktop entry and icons
 #   ./install.sh --uninstall   remove them
 #
@@ -18,12 +22,41 @@ set -eu
 APP_ID=@APP_ID@
 NAME=@NAME@
 TITLE=@TITLE@
+REPLACES=@REPLACES@
 
 APP_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 APPS_DIR=$DATA_HOME/applications
 ICONS_DIR=$DATA_HOME/icons/hicolor
 DESKTOP=$APPS_DIR/$APP_ID.desktop
+
+# The program a desktop entry's main Exec starts: field codes (%U, %f, …) and surrounding blanks
+# dropped, then the quotes of a quoted path. An unquoted path may contain spaces (older installers
+# wrote them so), which is why it is not cut at the first blank.
+exec_program() {
+    sed -n '/^\[Desktop Entry\]/,/^\[/ s/^Exec=//p' "$1" | head -n 1 \
+        | sed -e 's/[[:space:]]*%[a-zA-Z]//g' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/'
+}
+
+replace_old() {
+    for old in $REPLACES; do
+        entry=$APPS_DIR/$old.desktop
+        [ -f "$entry" ] || continue
+        program=$(exec_program "$entry")
+        case $program in
+            */"$NAME") ;;
+            *)
+                echo "$TITLE: left $entry alone: it starts '$program', not $NAME."
+                continue
+                ;;
+        esac
+        rm -f "$entry"
+        for icon in "$ICONS_DIR"/*/apps/"$old".png "$ICONS_DIR"/*/apps/"$old".svg; do
+            if [ -e "$icon" ]; then rm -f "$icon"; fi
+        done
+        echo "$TITLE: removed the earlier build's desktop entry and icons ($old)."
+    done
+}
 
 refresh() {
     if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database "$APPS_DIR" 2>/dev/null || true; fi
@@ -44,6 +77,8 @@ fi
 
 [ -x "$APP_DIR/$NAME" ] || { echo "ERROR: $NAME not found beside this script." >&2; exit 1; }
 [ -f "$APP_DIR/$APP_ID.desktop" ] || { echo "ERROR: $APP_ID.desktop not found beside this script." >&2; exit 1; }
+
+replace_old
 
 mkdir -p "$APPS_DIR"
 for icon in "$APP_DIR"/icons/hicolor/*/apps/"$APP_ID".png; do

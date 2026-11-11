@@ -196,9 +196,11 @@ final class LinuxTarball
         $template = Filesystem::read(\dirname(__DIR__, 2) . '/resources/linux/install.sh');
 
         return strtr($template, [
-            '@APP_ID@' => self::shellQuote($config->appId),
-            '@NAME@'   => self::shellQuote($config->linuxName),
-            '@TITLE@'  => self::shellQuote($config->title),
+            '@APP_ID@'   => self::shellQuote($config->appId),
+            '@NAME@'     => self::shellQuote($config->linuxName),
+            '@TITLE@'    => self::shellQuote($config->title),
+            // Validated desktop ids (no space or glob character), so a plain word list.
+            '@REPLACES@' => self::shellQuote(implode(' ', $config->linuxReplaces)),
         ]);
     }
 

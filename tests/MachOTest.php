@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager\Tests;
 
+use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\Macos\MachO;
 use Grafida\ShellPackager\PackagerException;
@@ -41,14 +42,15 @@ final class MachOTest extends TestCase
     public function testTheMinimumMacosAndTheArchitectureAreRead(): void
     {
         $m = MachO::read($this->file(MachOBuilder::bytes(minos: '12.0')));
-        self::assertTrue($m->isArm64());
+        self::assertSame(Arch::Aarch64, $m->arch());
         self::assertSame('12.0', $m->minos);
         self::assertSame(0, $m->appendedBytes());
 
         self::assertSame('15.5.1', MachO::read($this->file(MachOBuilder::bytes(minos: '15.5.1')))->minos);
         self::assertSame('11.0', MachO::read($this->file(MachOBuilder::bytes(minos: '11.0', legacyVersionCommand: true)))->minos);
         self::assertNull(MachO::read($this->file(MachOBuilder::bytes(minos: null)))->minos);
-        self::assertFalse(MachO::read($this->file(MachOBuilder::bytes(cpu: MachO::CPU_X86_64)))->isArm64());
+        self::assertSame(Arch::X86_64, MachO::read($this->file(MachOBuilder::bytes(cpu: MachO::CPU_X86_64)))->arch());
+        self::assertNull(MachO::read($this->file(MachOBuilder::bytes(cpu: 0x00000012)))->arch(), 'PowerPC');
     }
 
     public function testAnAppendedPayloadIsSeen(): void
@@ -90,7 +92,7 @@ final class MachOTest extends TestCase
             }
 
             $m = MachO::read($path);
-            self::assertTrue($m->isArm64(), $env);
+            self::assertSame(MacAppTest::realArch(), $m->arch(), $env);
             self::assertSame(0, $m->appendedBytes(), $env);
             self::assertNotNull($m->minos, $env);
             self::assertTrue(MachO::versionAtMost($m->minos, '12.0'), "{$env}: minos {$m->minos}");

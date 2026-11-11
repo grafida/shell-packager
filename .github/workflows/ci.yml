@@ -85,12 +85,21 @@ jobs:
       - run: composer install --no-interaction --no-progress
       - run: scripts/e2e-linux.sh
 
-  # The suite on an arm64 Mac, with the pinned macOS shell and SFX: the Mach-O checks on the real
+  # The suite on a Mac of each architecture, with that architecture's pinned macOS shell and SFX: the Mach-O checks on the real
   # bytes, signing ad hoc with the hardened runtime, the signatures read back, the worker answering
   # from inside the signed bundle, and the image.
+  # x86_64 (grafida/grafida#92) on an Intel runner, so its worker runs natively.
   test-macos:
-    name: Tests (macos-15)
-    runs-on: macos-15
+    name: Tests (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: aarch64}
+          - {runner: macos-15-intel, arch: x86_64}
+    env:
+      SHELL_PACKAGER_TEST_MACOS_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -101,7 +110,7 @@ jobs:
       - run: composer install --no-interaction --no-progress
       - name: Fetch the pinned macOS runtimes
         run: |
-          out="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch=aarch64 --platform=macos)"
+          out="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch=${{ matrix.arch }} --platform=macos)"
           echo "$out"
           echo "SHELL_PACKAGER_TEST_MACOS_SHELL=$(sed -n 's/^shell: //p' <<<"$out")" >> "$GITHUB_ENV"
           echo "SHELL_PACKAGER_TEST_MACOS_SFX=$(sed -n 's/^sfx: //p' <<<"$out")" >> "$GITHUB_ENV"
@@ -111,8 +120,16 @@ jobs:
   # launched through LaunchServices (scripts/e2e-macos.sh). No Finder layout: a runner cannot grant
   # Finder's Automation permission.
   e2e-macos:
-    name: End to end (macos-15)
-    runs-on: macos-15
+    name: End to end (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: aarch64}
+          - {runner: macos-15-intel, arch: x86_64}
+    env:
+      ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2

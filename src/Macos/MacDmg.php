@@ -41,14 +41,14 @@ final class MacDmg
     /** How long Finder may take to lay the window out before the styling is abandoned. */
     private const STYLE_TIMEOUT = 90;
 
-    /** `{name}`, `{version}`, `{arch}` (aarch64), `{debarch}` (arm64), relative to the app root. */
-    public static function outputPath(Config $config, string $version): string
+    /** `{name}`, `{version}`, `{arch}` (aarch64/x86_64), `{debarch}` (arm64/amd64), relative to the app root. */
+    public static function outputPath(Config $config, string $version, Arch $arch = Arch::Aarch64): string
     {
         $path = strtr($config->macos()->dmgOutput, [
             '{name}'    => $config->macos()->name,
             '{version}' => $version,
-            '{arch}'    => Arch::Aarch64->value,
-            '{debarch}' => Arch::Aarch64->debian(),
+            '{arch}'    => $arch->value,
+            '{debarch}' => $arch->debian(),
         ]);
 
         return str_starts_with($path, '/') ? $path : $config->root . '/' . $path;

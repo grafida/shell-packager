@@ -11,13 +11,15 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager\Macos;
 
+use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Config;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
 use Grafida\ShellPackager\Process;
 
 /**
- * The macOS app bundle (grafida/grafida#88). For an app whose `macos.name` is `Grafida` and whose
+ * The macOS app bundle (grafida/grafida#88), one per architecture: arm64, or x86_64 for Intel Macs
+ * (grafida/grafida#92). Every binary in it must be a thin Mach-O of that architecture. For an app whose `macos.name` is `Grafida` and whose
  * worker is `grafida-worker`:
  *
  * ```
@@ -38,10 +40,14 @@ use Grafida\ShellPackager\Process;
  */
 final class MacApp
 {
-    /** `{name}` in `macos.app`, relative to the app root. */
-    public static function outputPath(Config $config): string
+    /** `{name}`, `{arch}` (aarch64/x86_64) and `{debarch}` (arm64/amd64) in `macos.app`, relative to the app root. */
+    public static function outputPath(Config $config, Arch $arch = Arch::Aarch64): string
     {
-        $path = strtr($config->macos()->appOutput, ['{name}' => $config->macos()->name]);
+        $path = strtr($config->macos()->appOutput, [
+            '{name}'    => $config->macos()->name,
+            '{arch}'    => $arch->value,
+            '{debarch}' => $arch->debian(),
+        ]);
 
         if (!str_ends_with($path, '.app')) {
             throw new PackagerException("macos.app must name a .app bundle; got '{$path}'.");
@@ -55,7 +61,7 @@ final class MacApp
      *
      * @param array{shell: string, sfx: string} $runtimes paths of verified binaries
      */
-    public static function assemble(Config $config, array $runtimes, string $payload, string $app, string $version): void
+    public static function assemble(Config $config, array $runtimes, string $payload, string $app, string $version, Arch $arch = Arch::Aarch64): void
     {
         $macos = $config->macos();
 
@@ -65,7 +71,7 @@ final class MacApp
         }
 
         foreach (['shell' => $runtimes['shell'], 'sfx' => $runtimes['sfx']] as $what => $path) {
-            self::checkBinary($what, MachO::read($path));
+            self::checkBinary($what, MachO::read($path), $arch);
         }
 
         if (is_dir($app)) {
@@ -138,10 +144,12 @@ final class MacApp
     }
 
     /** The minimum macOS, the architecture and the payload of a binary going into the bundle. */
-    private static function checkBinary(string $what, MachO $binary): void
+    private static function checkBinary(string $what, MachO $binary, Arch $arch): void
     {
-        if (!$binary->isArm64()) {
-            throw new PackagerException("The {$what} ({$binary->path}) is not an arm64 binary; macOS packages are arm64 only.");
+        if ($binary->arch() !== $arch) {
+            $have = $binary->arch()?->debian() ?? \sprintf('CPU type 0x%08x', $binary->cpuType);
+
+            throw new PackagerException("The {$what} ({$binary->path}) is an {$have} binary, not {$arch->debian()}: a bundle holds one architecture.");
         }
 
         if ($binary->appendedBytes() > 0) {

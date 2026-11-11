@@ -15,10 +15,12 @@ use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
 use Grafida\ShellPackager\Platform;
+use Grafida\ShellPackager\Process;
 
 /**
  * Runs the packaged worker before it ships, when this machine can (the target's OS and
- * architecture: Linux, an arm64 Mac, or Windows x86_64):
+ * architecture: Linux, a Mac, or Windows x86_64; an x86_64 macOS worker also runs on an arm64 Mac
+ * with Rosetta 2, translated, grafida/grafida#92):
  *
  * - **the ini probe:** a tiny PHAR behind the same extra-INI block, on the same stub, reports
  *   `ini_get()` for every key; each must be what was asked for. This is what catches a block
@@ -43,13 +45,53 @@ final class WorkerCheck
 
     public static function canRun(Arch $arch, Platform $platform = Platform::Linux): bool
     {
-        $os = match ($platform) {
+        return self::decide(\PHP_OS_FAMILY, Arch::host(), $arch, $platform, self::rosetta(...));
+    }
+
+    /**
+     * Whether a host ($os as PHP_OS_FAMILY names it, $host its CPU) runs a $platform/$arch worker:
+     * natively, or, an x86_64 macOS one on an arm64 Mac, under Rosetta 2 when $rosetta says it is
+     * installed. Asked only in that one case. Never faked: without Rosetta the check is skipped.
+     *
+     * @param \Closure(): bool $rosetta
+     */
+    public static function decide(string $os, ?Arch $host, Arch $arch, Platform $platform, \Closure $rosetta): bool
+    {
+        $want = match ($platform) {
             Platform::Linux   => 'Linux',
             Platform::Macos   => 'Darwin',
             Platform::Windows => 'Windows',
         };
 
-        return \PHP_OS_FAMILY === $os && Arch::host() === $arch;
+        if ($os !== $want || $host === null) {
+            return false;
+        }
+
+        if ($host === $arch) {
+            return true;
+        }
+
+        return $platform === Platform::Macos && $host === Arch::Aarch64 && $arch === Arch::X86_64 && $rosetta();
+    }
+
+    /** True when this arm64 Mac runs x86_64 code, i.e. Rosetta 2 is installed. */
+    public static function rosetta(): bool
+    {
+        if (\PHP_OS_FAMILY !== 'Darwin' || !is_executable('/usr/bin/arch')) {
+            return false;
+        }
+
+        [$code] = Process::run(['/usr/bin/arch', '-x86_64', '/usr/bin/true']);
+
+        return $code === 0;
+    }
+
+    /** "under Rosetta 2" when a $arch macOS worker is translated here, else the empty string. */
+    public static function translation(Arch $arch, Platform $platform): string
+    {
+        return $platform === Platform::Macos && \PHP_OS_FAMILY === 'Darwin' && Arch::host() === Arch::Aarch64 && $arch === Arch::X86_64
+            ? ' (x86_64 under Rosetta 2)'
+            : '';
     }
 
     /** @param array<string, bool|int|float|string> $ini */

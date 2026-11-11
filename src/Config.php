@@ -38,9 +38,10 @@ use Grafida\ShellPackager\Windows\WindowsConfig;
  *       "launcher": {"url": "https://…/0.2.0/grafida-launcher-linux-{arch}", "sha256": {…}},
  *       "sfx":      {"url": "https://…/sfx-…/linux-{arch}.standard.sfx",     "sha256": {…}}
  *     },
- *     "macos": {
- *       "shell": {"url": "https://…/0.2.0/grafida-shell-macos-arm64",         "sha256": {"aarch64": "…"}},
- *       "sfx":   {"url": "https://…/sfx-…/macos-aarch64.standard.sfx",        "sha256": {"aarch64": "…"}}
+ *     "macos": {   // a url per architecture when they come from different releases
+ *       "shell": {"url": {"aarch64": "https://…/0.2.0/grafida-shell-macos-arm64", "x86_64": "https://…/0.4.0/grafida-shell-macos-x86_64"},
+ *                 "sha256": {"aarch64": "…", "x86_64": "…"}},
+ *       "sfx":   {"url": "https://…/sfx-…/macos-{arch}.standard.sfx",        "sha256": {"aarch64": "…", "x86_64": "…"}}
  *     }
  *   },
  *   "linux": {
@@ -48,12 +49,18 @@ use Grafida\ShellPackager\Windows\WindowsConfig;
  *     "desktop": "assets/logo/grafida.desktop",
  *     "icons": {"48": "assets/logo/png/grafida-48.png", "512": "…"},
  *     "files": {"LICENSE.txt": "LICENSE.txt"},
+ *     "replaces": ["grafida"],   // desktop ids of an earlier build install.sh removes (see below)
  *     "output": "build/dist/Grafida-{version}-linux-{debarch}-shell-preview.tar.gz"
  *   },
  *   "macos": {…},   // see Macos\MacosConfig
  *   "windows": {…}  // see Windows\WindowsConfig
  * }
  * ```
+ *
+ * `linux.replaces` names the desktop entries of a build this one supersedes under another id (an
+ * app's previous packaging; grafida/grafida#92). `install.sh` deletes `<id>.desktop` and that id's
+ * hicolor icons from the user's data directory, but only when the entry exists and its `Exec`
+ * starts a program called `linux.name`; any other entry with that id is left alone, and said so.
  *
  * `runtimes` is grouped by platform. A flat `runtimes` (names straight under it, as before
  * macOS) still means Linux; mixing the two shapes is an error, never a half-read configuration.
@@ -86,6 +93,8 @@ final readonly class Config
         public string $linuxOutput,
         public ?MacosConfig $macos = null,
         public ?WindowsConfig $windows = null,
+        /** @var list<string> desktop ids install.sh replaces */
+        public array $linuxReplaces = [],
     ) {
     }
 
@@ -151,6 +160,24 @@ final readonly class Config
 
         $desktop = isset($linux['desktop']) ? self::path($root, self::string($linux, 'desktop'), 'linux.desktop') : null;
         $appId   = self::string($manifest, 'id', null, $manifestPath);
+        $replaces = [];
+
+        if (isset($linux['replaces']) && (!\is_array($linux['replaces']) || !array_is_list($linux['replaces']))) {
+            throw new PackagerException('linux.replaces is a list of desktop ids.');
+        }
+
+        foreach ($linux['replaces'] ?? [] as $id) {
+            // A desktop-file id: what install.sh may put in a path and a glob, nothing else.
+            if (!\is_string($id) || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $id) !== 1) {
+                throw new PackagerException('linux.replaces lists desktop ids (letters, digits, . _ -); got ' . json_encode($id) . '.');
+            }
+
+            if ($id === $appId) {
+                throw new PackagerException("linux.replaces cannot name the app's own id '{$appId}'.");
+            }
+
+            $replaces[] = $id;
+        }
 
         return new self(
             root: $root,
@@ -169,6 +196,7 @@ final readonly class Config
             linuxOutput: self::string($linux, 'output', 'build/dist/{name}-{version}-linux-{arch}.tar.gz', 'linux'),
             macos: isset($data['macos']) ? self::parseMacos($root, self::object($data, 'macos', $real), self::string($manifest, 'title', null, $manifestPath)) : null,
             windows: isset($data['windows']) ? self::parseWindows($root, self::object($data, 'windows', $real), self::string($manifest, 'title', null, $manifestPath)) : null,
+            linuxReplaces: array_values(array_unique($replaces)),
         );
     }
 

@@ -15,6 +15,7 @@ use Grafida\ShellPackager\Linux\LinuxTarball;
 use Grafida\ShellPackager\Macos\Codesign;
 use Grafida\ShellPackager\Macos\MacApp;
 use Grafida\ShellPackager\Macos\MacDmg;
+use Grafida\ShellPackager\Macos\MachO;
 use Grafida\ShellPackager\Phar\PharBuilder;
 use Grafida\ShellPackager\Phar\WorkerCheck;
 use Grafida\ShellPackager\Windows\Authenticode;
@@ -24,15 +25,15 @@ use Grafida\ShellPackager\Windows\WindowsTree;
 /** `bin/shell-packager`: argument parsing and the commands. */
 final class Cli
 {
-    public const VERSION = '0.3.1';
+    public const VERSION = '0.4.0';
 
     public const USAGE = <<<'TXT'
-        shell-packager 0.3.1: packaging for apps on the Grafida desktop shell
+        shell-packager 0.4.0: packaging for apps on the Grafida desktop shell
 
         Usage:
           shell-packager linux-tarball --config=FILE --arch=ARCH --app-version=VERSION [options]
-          shell-packager macos-app --config=FILE --app-version=VERSION [options]
-          shell-packager macos-dmg --config=FILE --app-version=VERSION [--app=APP] [--no-style] [options]
+          shell-packager macos-app --config=FILE --app-version=VERSION [--arch=ARCH] [options]
+          shell-packager macos-dmg --config=FILE --app-version=VERSION [--arch=ARCH] [--app=APP] [--no-style] [options]
           shell-packager windows-tree --config=FILE --app-version=VERSION [--output=DIR] [options]
           shell-packager windows-installer --config=FILE --app-version=VERSION [--output=FILE] [options]
           shell-packager windows-sign --file=FILE [--overlay]
@@ -42,8 +43,8 @@ final class Cli
 
         Options:
           --config=FILE        the app's packaging configuration (shell-package.json)
-          --arch=ARCH          x86_64 or aarch64 (amd64/arm64 accepted); macOS is aarch64 only,
-                               Windows x86_64 only
+          --arch=ARCH          x86_64 or aarch64 (amd64/arm64 accepted); macOS defaults to aarch64,
+                               Windows is x86_64 only
           --app-version=V      the app's version (macOS: one to three dot-separated integers)
           --output=FILE        where to write (overrides linux.output, macos.app, macos.output,
                                windows.tree or windows.output)
@@ -53,7 +54,8 @@ final class Cli
           --local=NAME=PATH    use a local file for runtime NAME (shell, launcher, sfx). UNPINNED:
                                for testing an unreleased build only; announced on every use
           --no-check           skip running the packaged worker (it runs only on a host of the
-                               target's OS and architecture anyway)
+                               target's OS and architecture anyway; a macOS x86_64 worker also
+                               on an arm64 Mac with Rosetta 2)
           --file=FILE          windows-sign: the executable to sign (what !uninstfinalize runs)
           --overlay            windows-sign: the file keeps data past its image (an NSIS installer
                                or uninstaller); never for a worker stub
@@ -139,10 +141,16 @@ final class Cli
     }
 
     /** @param array<string, list<string>> $options */
+    private static function macosArch(array $options): Arch
+    {
+        return isset($options['arch']) ? Arch::parse(self::one($options, 'arch')) : Arch::Aarch64;
+    }
+
+    /** @param array<string, list<string>> $options */
     private static function macosApp(array $options): int
     {
         $config = Config::load(self::one($options, 'config'));
-        $app    = isset($options['output']) ? self::one($options, 'output') : MacApp::outputPath($config);
+        $app    = isset($options['output']) ? self::one($options, 'output') : MacApp::outputPath($config, self::macosArch($options));
         self::buildApp($config, $options, $app);
         self::say("Done: {$app}");
 
@@ -154,7 +162,7 @@ final class Cli
     {
         $config   = Config::load(self::one($options, 'config'));
         $version  = self::one($options, 'app-version');
-        $output   = isset($options['output']) ? self::one($options, 'output') : MacDmg::outputPath($config, $version);
+        $output   = isset($options['output']) ? self::one($options, 'output') : MacDmg::outputPath($config, $version, self::macosArch($options));
         $codesign = Codesign::fromEnvironment();
         $work     = null;
 
@@ -166,6 +174,18 @@ final class Cli
             }
 
             Codesign::verify($app);
+            $arch = self::macosArch($options);
+
+            // The image is named after --arch: an arm64 bundle must not become an amd64 image.
+            $binaries = glob($app . '/Contents/MacOS/*');
+
+            foreach (\is_array($binaries) ? $binaries : [] as $binary) {
+                $have = MachO::read($binary)->arch();
+
+                if ($have !== $arch) {
+                    throw new PackagerException("--app={$app}: {$binary} is " . ($have?->debian() ?? 'of an unknown CPU') . ", not {$arch->debian()} (--arch).");
+                }
+            }
 
             if (!$codesign->adHoc() && Codesign::isAdHoc($app)) {
                 // Imaged into a Developer ID image, an ad-hoc app would fail only at notarisation.
@@ -198,11 +218,7 @@ final class Cli
     private static function buildApp(Config $config, array $options, string $app): void
     {
         $version = self::one($options, 'app-version');
-        $arch    = isset($options['arch']) ? Arch::parse(self::one($options, 'arch')) : Arch::Aarch64;
-
-        if ($arch !== Arch::Aarch64) {
-            throw new PackagerException('macOS packages are arm64 (aarch64) only.');
-        }
+        $arch    = self::macosArch($options);
 
         $config->macos();
         $codesign = Codesign::fromEnvironment();
@@ -226,15 +242,17 @@ final class Cli
                 WorkerCheck::iniProbe($runtimes['sfx'], $config->ini);
             }
 
-            MacApp::assemble($config, $runtimes, $payload, $app, $version);
+            MacApp::assemble($config, $runtimes, $payload, $app, $version, $arch);
             self::say('Signing (' . $codesign->describe() . ', hardened runtime)');
             MacApp::sign($config, $app, $codesign);
 
             if ($check) {
                 $header = WorkerCheck::handshakeAt("{$app}/Contents/MacOS/{$config->workerBinary}");
-                self::say('Worker check: the ini block applies, and the signed worker in the bundle answered ' . $header);
+                self::say('Worker check' . WorkerCheck::translation($arch, Platform::Macos) . ': the ini block applies, and the signed worker in the bundle answered ' . $header);
             } else {
-                self::say('Worker check skipped' . (isset($options['no-check']) ? '.' : ': it runs only on an arm64 Mac.'));
+                self::say('Worker check skipped' . (isset($options['no-check'])
+                    ? '.'
+                    : ": this machine cannot run a macOS {$arch->value} binary (an Intel Mac, or for x86_64 an arm64 Mac with Rosetta 2, can)."));
             }
         } finally {
             Filesystem::remove($work);

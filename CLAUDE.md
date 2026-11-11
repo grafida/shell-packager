@@ -26,11 +26,14 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
 - **The ini block is checked by running it** (`Phar\WorkerCheck`): phpmicro ignores a malformed
   block silently and then writes its bytes to stdout. The handshake check (protocol v1 `ready`) is
   the app-agnostic proof that a payload boots. Both need a host of the target's OS and architecture
-  (Linux, an arm64 Mac, or Windows x86_64); elsewhere they are skipped with a note, never faked. On macOS the
+  (Linux, a Mac, or Windows x86_64; an x86_64 macOS worker also on an arm64 Mac with Rosetta 2, which
+  `WorkerCheck::decide()` asks about through an injected probe, `arch -x86_64 /usr/bin/true`);
+  elsewhere they are skipped with a note, never faked. On macOS the
   handshake runs on the **signed stub inside the finished bundle** (`handshakeAt`), under the
   hardened runtime with the entitlements it was given: that is the test any entitlement must fail
   without before it is kept (grafida/grafida#88).
-- **macOS (`src/Macos/`) is arm64 only.** `MachO` reads, in PHP, each binary's CPU, its minimum
+- **macOS (`src/Macos/`) builds one bundle per architecture** (arm64, and x86_64 for Intel Macs,
+  grafida/grafida#92; `--arch`, default aarch64). `MachO` reads, in PHP, each binary's CPU, its minimum
   macOS (`LC_BUILD_VERSION`) and where its image ends; a file longer than its last segment is an SFX
   with its payload still appended, which is refused (signing it corrupts the PHAR). Both real pins
   end exactly at their last segment; `MachOTest` checks that on CI. `LSMinimumSystemVersion` is
@@ -67,7 +70,13 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   install from a lock reads; composer's junction is a leaf to `RecursiveDirectoryIterator`, so the
   package went missing from the PHAR). The Linux fixture tarball was byte-identical before and after.
 - **`runtimes` is grouped by platform** (`linux`, `macos`, `windows`); a flat one is Linux's, and a
-  mix is an error. Grafida's configuration used the flat shape.
+  mix is an error. Grafida's configuration used the flat shape. A runtime's `url` is one template
+  (`{arch}`) or an object of one URL per architecture, for pins of one platform verified on
+  different releases (Grafida's macOS arm64 and x86_64).
+- **`linux.replaces`** (grafida/grafida#92) lets `install.sh` remove an earlier build's desktop
+  entry and hicolor icons under another id, only when its main `Exec` (field codes dropped, quotes
+  removed; an older installer wrote an unquoted path with spaces) ends in `/<linux.name>`. The ids are
+  validated as desktop ids so the script can glob them; the app's own id is refused.
 - **Determinism:** sorted PHAR entries, `seld/phar-utils` timestamps, `SOURCE_DATE_EPOCH`, and our
   own `Archive\TarWriter` (ustar, uid/gid 0, fixed mtime, streamed gzip). PharData cannot set modes
   and times, and BSD tar on macOS has no `--sort`/`--mtime`, while Linux packages are also built on
@@ -77,7 +86,7 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   `scripts/e2e-linux.sh` packages it, installs it and runs it headless (CI does, on both arches);
   `scripts/e2e-macos.sh` builds its DMG, mounts it, copies the app out and launches it **through
   LaunchServices** (`open`), which is the only thing that reads `Info.plist` (CI does, on macos-15,
-  with `--no-style`). `scripts/e2e-windows.sh` builds its installer (or takes one, `INSTALLER=`, as the
+  with `--no-style`; and the x86_64 bundle on `macos-15-intel`, `ARCH=x86_64`). `scripts/e2e-windows.sh` builds its installer (or takes one, `INSTALLER=`, as the
   test guests do), installs it silently, reads back the resources and signatures as Windows does,
   launches it and uninstalls it (CI does, unsigned, on windows-2022). ⚠️ In Git Bash an NSIS switch
   is `//S` (MSYS rewrites `/S` to `S:/`), and `/D=` takes a path with no space in it. Bump those pins

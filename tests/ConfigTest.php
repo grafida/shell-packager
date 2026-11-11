@@ -64,7 +64,22 @@ final class ConfigTest extends TestCase
     {
         $script = LinuxTarball::installer(Fixture::config());
 
-        self::assertStringContainsString("APP_ID='test.packager.app'\nNAME='test-app'\nTITLE='Packager Test'\n", $script);
+        self::assertStringContainsString("APP_ID='test.packager.app'\nNAME='test-app'\nTITLE='Packager Test'\nREPLACES=''\n", $script);
         self::assertStringNotContainsString('@', preg_replace('/^#.*$/m', '', $script) ?? '');
+
+        $script = LinuxTarball::installer(Fixture::config(linux: ['replaces' => ['old-app', 'org.example.Old', 'old-app']]));
+        self::assertStringContainsString("REPLACES='old-app org.example.Old'\n", $script);
+    }
+
+    public function testReplacesListsDesktopIdsOnly(): void
+    {
+        foreach ([['a b'], ['../x'], ['*'], [''], 'old-app', ['k' => 'old-app'], ['test.packager.app']] as $replaces) {
+            try {
+                Fixture::config(linux: ['replaces' => $replaces]);
+                self::fail('accepted ' . json_encode($replaces));
+            } catch (PackagerException $e) {
+                self::assertStringContainsString('linux.replaces', $e->getMessage());
+            }
+        }
     }
 }

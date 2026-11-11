@@ -28,8 +28,9 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The bundle: its layout and the checks on what goes in, with synthetic Mach-O files (any host);
- * then, on a Mac with the real pinned runtimes (SHELL_PACKAGER_TEST_MACOS_SHELL and _SFX), signing,
- * the signatures read back, the worker answering from inside the signed bundle, and the image.
+ * then, on a Mac with the real pinned runtimes (SHELL_PACKAGER_TEST_MACOS_SHELL and _SFX, of the
+ * architecture SHELL_PACKAGER_TEST_MACOS_ARCH, default aarch64), signing, the signatures read back,
+ * the worker answering from inside the signed bundle, and the image.
  */
 #[RequiresSetting('phar.readonly', '0')]
 // A bundle is assembled on Linux and macOS (Linux CI checks its layout); never on a Windows host.
@@ -109,10 +110,31 @@ final class MacAppTest extends TestCase
         MacApp::assemble(self::config(), $this->synthetic(shell: MachOBuilder::bytes(minos: '13.0')), __FILE__, $this->dir . '/A.app', '1.0');
     }
 
-    public function testAnIntelBinaryIsRefused(): void
+    public function testAnIntelBinaryIsRefusedInAnArm64Bundle(): void
     {
-        $this->expectExceptionMessage('not an arm64 binary');
+        $this->expectExceptionMessage('is an amd64 binary, not arm64');
         MacApp::assemble(self::config(), $this->synthetic(sfx: MachOBuilder::bytes(cpu: MachO::CPU_X86_64)), __FILE__, $this->dir . '/A.app', '1.0');
+    }
+
+    public function testAnIntelBundleHoldsIntelBinaries(): void
+    {
+        $x86 = $this->synthetic(MachOBuilder::bytes(cpu: MachO::CPU_X86_64), MachOBuilder::bytes(cpu: MachO::CPU_X86_64, image: 8192));
+        Filesystem::write($this->dir . '/payload', 'PAYLOAD');
+        $app = $this->dir . '/Intel.app';
+        MacApp::assemble(self::config(), $x86, $this->dir . '/payload', $app, '1.0', Arch::X86_64);
+        self::assertSame(Arch::X86_64, MachO::read("{$app}/Contents/MacOS/Packager Test")->arch());
+
+        $this->expectExceptionMessage('is an arm64 binary, not amd64');
+        MacApp::assemble(self::config(), $this->synthetic(sfx: MachOBuilder::bytes(cpu: MachO::CPU_X86_64)), __FILE__, $this->dir . '/B.app', '1.0', Arch::X86_64);
+    }
+
+    public function testTheOutputsNameTheArchitecture(): void
+    {
+        $config = self::config(['app' => 'build/{name}-{debarch}.app', 'output' => 'dist/{name}-{version}-{arch}-{debarch}.dmg']);
+        self::assertSame(Fixture::APP . '/build/Packager Test-amd64.app', MacApp::outputPath($config, Arch::X86_64));
+        self::assertSame(Fixture::APP . '/build/Packager Test-arm64.app', MacApp::outputPath($config));
+        self::assertSame(Fixture::APP . '/dist/Packager Test-1.2-x86_64-amd64.dmg', MacDmg::outputPath($config, '1.2', Arch::X86_64));
+        self::assertSame(Fixture::APP . '/dist/Packager Test-1.2-aarch64-arm64.dmg', MacDmg::outputPath($config, '1.2'));
     }
 
     public function testNamesThatDifferOnlyInCaseAreOneFile(): void
@@ -121,14 +143,23 @@ final class MacAppTest extends TestCase
         MacApp::assemble(self::config(['name' => 'TEST-WORKER']), $this->synthetic(), __FILE__, $this->dir . '/A.app', '1.0');
     }
 
+    /** The architecture of the real runtimes under test. */
+    public static function realArch(): Arch
+    {
+        $arch = getenv('SHELL_PACKAGER_TEST_MACOS_ARCH');
+
+        return \is_string($arch) && $arch !== '' ? Arch::parse($arch) : Arch::Aarch64;
+    }
+
     /** @return array{shell: string, sfx: string} */
     private static function realRuntimes(): array
     {
         $shell = getenv('SHELL_PACKAGER_TEST_MACOS_SHELL');
         $sfx   = getenv('SHELL_PACKAGER_TEST_MACOS_SFX');
+        $arch  = self::realArch();
 
-        if (!\is_string($shell) || !is_file($shell) || !\is_string($sfx) || !is_file($sfx) || !WorkerCheck::canRun(Arch::Aarch64, Platform::Macos)) {
-            self::markTestSkipped('An arm64 Mac with SHELL_PACKAGER_TEST_MACOS_SHELL and _SFX set to the pinned runtimes.');
+        if (!\is_string($shell) || !is_file($shell) || !\is_string($sfx) || !is_file($sfx) || !WorkerCheck::canRun($arch, Platform::Macos)) {
+            self::markTestSkipped("A Mac that runs {$arch->value} code, with SHELL_PACKAGER_TEST_MACOS_SHELL and _SFX set to the pinned runtimes.");
         }
 
         return ['shell' => $shell, 'sfx' => $sfx];
@@ -139,7 +170,7 @@ final class MacAppTest extends TestCase
         $payload = $this->dir . '/test-worker.phar';
         (new PharBuilder())->build($config, $payload, 1700000000);
         $app = $this->dir . '/Packager Test.app';
-        MacApp::assemble($config, self::realRuntimes(), $payload, $app, '1.0.0');
+        MacApp::assemble($config, self::realRuntimes(), $payload, $app, '1.0.0', self::realArch());
         MacApp::sign($config, $app, new Codesign(null));
 
         return $app;

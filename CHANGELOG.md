@@ -1,3 +1,11 @@
+shell-packager 0.4.0
+================================================================================
++ macOS x86_64: `macos-app` and `macos-dmg --arch=x86_64` build an Intel bundle and image (`{debarch}` `amd64`)
++ `linux.replaces`: `install.sh` removes an earlier build's desktop entry and icons under another id
++ A runtime's `url` may name one URL per architecture
+~ The macOS worker check runs an x86_64 worker on an arm64 Mac under Rosetta 2, and skips with a note without it
+~ `macos-dmg --app=` refuses a bundle whose binaries are not of `--arch`
+
 shell-packager 0.3.1
 ================================================================================
 ~ The PHAR is filled in one call: Grafida's 1,690 files took 25 s and take 0.1 s, to the same bytes

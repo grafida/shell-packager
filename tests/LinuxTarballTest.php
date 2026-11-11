@@ -112,4 +112,55 @@ final class LinuxTarballTest extends TestCase
         self::assertFileDoesNotExist($this->dir . '/data/applications/test.packager.app.desktop');
         self::assertFileDoesNotExist($this->dir . '/data/icons/hicolor/48x48/apps/test.packager.app.png');
     }
+
+    /**
+     * linux.replaces (grafida/grafida#92): an earlier build's entry under another id is removed with
+     * its icons when it starts a program of this package's name, and left alone otherwise.
+     */
+    public function testTheInstallerReplacesAnEarlierBuildsEntryOnly(): void
+    {
+        $out = $this->dir . '/test.tar.gz';
+        chmod("{$this->dir}/launcher", 0o755);
+        LinuxTarball::write(
+            Fixture::config(linux: ['replaces' => ['old-app', 'quoted-app', 'foreign-app', 'absent-app']]),
+            ['launcher' => "{$this->dir}/launcher", 'shell' => "{$this->dir}/shell", 'sfx' => "{$this->dir}/sfx"],
+            "{$this->dir}/payload",
+            $out,
+            1700000000
+        );
+        exec('tar -xzf ' . escapeshellarg($out) . ' -C ' . escapeshellarg($this->dir) . ' 2>&1', $lines, $code);
+
+        if ($code === 127) {
+            self::markTestSkipped('no tar');
+        }
+
+        $apps  = $this->dir . '/data/applications';
+        $icons = $this->dir . '/data/icons/hicolor';
+        // As an older installer wrote it: an absolute, unquoted path with a space, and an icon path.
+        Filesystem::write("{$apps}/old-app.desktop", "[Desktop Entry]\nType=Application\nName=Old\nExec=/home/u/My Apps/test-app\nIcon={$icons}/512x512/apps/old-app.png\n");
+        Filesystem::write("{$icons}/512x512/apps/old-app.png", 'PNG');
+        Filesystem::write("{$icons}/scalable/apps/old-app.svg", 'SVG');
+        // Quoted, with a field code, and an action whose Exec is something else.
+        Filesystem::write("{$apps}/quoted-app.desktop", "[Desktop Entry]\nExec=\"/opt/x y/test-app\" %U\n[Desktop Action new]\nExec=/bin/other\n");
+        // Another program under one of the ids: never touched.
+        Filesystem::write("{$apps}/foreign-app.desktop", "[Desktop Entry]\nExec=/usr/bin/test-app-helper --run\n");
+        Filesystem::write("{$icons}/48x48/apps/foreign-app.png", 'PNG');
+
+        $env = 'XDG_DATA_HOME=' . escapeshellarg($this->dir . '/data') . ' HOME=' . escapeshellarg($this->dir);
+        $lines = [];
+        exec("{$env} sh " . escapeshellarg("{$this->dir}/test-app/install.sh") . ' 2>&1', $lines, $code);
+        $said = implode("\n", $lines);
+        self::assertSame(0, $code, $said);
+
+        self::assertFileDoesNotExist("{$apps}/old-app.desktop");
+        self::assertFileDoesNotExist("{$icons}/512x512/apps/old-app.png");
+        self::assertFileDoesNotExist("{$icons}/scalable/apps/old-app.svg");
+        self::assertFileDoesNotExist("{$apps}/quoted-app.desktop");
+        self::assertFileExists("{$apps}/foreign-app.desktop");
+        self::assertFileExists("{$icons}/48x48/apps/foreign-app.png");
+        self::assertFileExists("{$apps}/test.packager.app.desktop");
+        self::assertStringContainsString('removed the earlier build\'s desktop entry and icons (old-app)', $said);
+        self::assertStringContainsString("left {$apps}/foreign-app.desktop alone: it starts '/usr/bin/test-app-helper --run', not test-app", $said);
+        self::assertStringNotContainsString('absent-app', $said);
+    }
 }

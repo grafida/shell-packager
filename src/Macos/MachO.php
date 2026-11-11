@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager\Macos;
 
+use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
 
@@ -25,8 +26,9 @@ use Grafida\ShellPackager\PackagerException;
  *   than that carries an appended payload: a phpmicro SFX with its PHAR still attached, which
  *   codesign would seal past the PHAR and so corrupt it (grafida/grafida#88, ADR 0001).
  *
- * Only thin 64-bit little-endian images are accepted: the shell is arm64 only, and a fat binary
- * would need a slice chosen for it.
+ * Only thin 64-bit little-endian images are accepted: an app ships one bundle per architecture
+ * (arm64, and x86_64 for Intel Macs; grafida/grafida#92), and a fat binary would need a slice
+ * chosen for it.
  */
 final readonly class MachO
 {
@@ -61,7 +63,7 @@ final readonly class MachO
         $magic = self::u32($data, 0);
 
         if ($magic === self::FAT_MAGIC || self::u32be($data, 0) === self::FAT_MAGIC) {
-            throw new PackagerException("{$path} is a universal (fat) binary; a thin arm64 one is expected.");
+            throw new PackagerException("{$path} is a universal (fat) binary; a thin one of the bundle's architecture is expected.");
         }
 
         if ($magic !== self::MH_MAGIC_64) {
@@ -101,9 +103,14 @@ final readonly class MachO
         return new self($path, $cpu, $minos, $end, $size);
     }
 
-    public function isArm64(): bool
+    /** The architecture, or null for a CPU no macOS bundle is made for. */
+    public function arch(): ?Arch
     {
-        return $this->cpuType === self::CPU_ARM64;
+        return match ($this->cpuType) {
+            self::CPU_ARM64  => Arch::Aarch64,
+            self::CPU_X86_64 => Arch::X86_64,
+            default          => null,
+        };
     }
 
     /** Bytes past the image: a payload appended to the executable. */

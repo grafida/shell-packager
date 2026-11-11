@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager\Tests;
 
+use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Config;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\Macos\InfoPlist;
@@ -43,8 +44,8 @@ final class MacosConfigTest extends TestCase
     {
         $config = self::load([]);
 
-        self::assertStringEndsWith('/grafida-shell-macos-arm64', $config->runtime('shell', Platform::Macos)->url);
-        self::assertStringContainsString('linux-{arch}', $config->runtime('shell')->url);
+        self::assertStringEndsWith('/grafida-shell-macos-arm64', $config->runtime('shell', Platform::Macos)->url(Arch::Aarch64));
+        self::assertStringEndsWith('/grafida-shell-linux-x86_64', $config->runtime('shell')->url(Arch::X86_64));
         self::assertSame('linux', Platform::Linux->value);
     }
 
