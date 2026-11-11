@@ -115,8 +115,10 @@ final class LinuxTarballTest extends TestCase
 
     /**
      * linux.replaces (grafida/grafida#92): an earlier build's entry under another id is removed with
-     * its icons when it starts a program of this package's name, and left alone otherwise.
+     * its icons when it starts a program of this package's name, and left alone otherwise. Any host
+     * with a POSIX sh (Linux, macOS); Windows has none.
      */
+    #[\PHPUnit\Framework\Attributes\RequiresOperatingSystem('^(?!WIN)')]
     public function testTheInstallerReplacesAnEarlierBuildsEntryOnly(): void
     {
         $out = $this->dir . '/test.tar.gz';
