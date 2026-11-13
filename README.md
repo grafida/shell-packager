@@ -7,10 +7,11 @@ Build and packaging tooling for applications built on the
 [Grafida](https://github.com/grafida/grafida)'s own build scripts, and it knows nothing about any
 one app's layout: everything app-specific comes from the app's configuration and manifest.
 
-**Status:** Linux (tarball + per-user installer), macOS (arm64 and x86_64 bundles, signing, notarisation, DMG)
-and Windows (x86_64 install tree, icon and version resources, Authenticode, an NSIS installer) work,
-as tracked in [grafida/grafida#82](https://github.com/grafida/grafida/issues/82). Every platform's
-package is built and signed on any host: the Mac builds all of them.
+> [!TIP]
+> **Start with the user documentation:** [Packaging](https://github.com/grafida/shell/blob/main/docs/user/packaging.md) covers the configuration, the pinned runtimes,
+> building for each platform, unsigned builds and signing credentials, and
+> [Getting signing certificates](https://github.com/grafida/shell/blob/main/docs/user/code-signing.md) explains how to obtain them. This README keeps the
+> packager-specific reference: command line, the layout of each package and what the packager checks.
 
 ## Use
 
@@ -32,90 +33,20 @@ then byte-identical (the macOS bundle and image are not: `codesign` and `hdiutil
 
 ## The configuration
 
-A JSON file in the app (conventionally `shell-package.json`). Paths are relative to it. The package
-is named after the app's manifest, so the shell and the package cannot disagree: `id` names the
-desktop entry and icons (and is the window's Wayland `app_id`), `title` appears in the alerts, and
-`worker.binary` names the SFX stub and its `.phar`.
+The configuration is a JSON file in the app, conventionally `shell-package.json`; paths in it are relative to it. Its
+members (`phar`, `runtimes`, `linux`, `macos`, `windows`), the pinned and `latest` runtimes, and `--local` are
+documented in [Packaging](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#the-configuration-file-shell-packagejson). The package is named after the
+app's manifest, so the shell and the package cannot disagree: `id` names the desktop entry and icons (and is the
+window's Wayland `app_id`), `title` appears in the alerts, and `worker.binary` names the SFX stub and its `.phar`.
 
-```jsonc
-{
-  "manifest": "shell.json",
-  "phar": {
-    "entrypoint": "bin/worker.php",
-    "include": [
-      {"directory": "assets/private"},
-      {"directory": "src", "name": "*.php"},
-      {"directory": "vendor", "name": "*.php", "notName": ["*Test.php"], "notPath": ["some/package"]}
-    ],
-    "ini": {"memory_limit": "512M", "opcache.enable": false}
-  },
-  "runtimes": {
-    "linux": {
-      "shell":    {"url": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-linux-{arch}",    "sha256": {"x86_64": "…", "aarch64": "…"}},
-      "launcher": {"url": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-launcher-linux-{arch}", "sha256": {"x86_64": "…", "aarch64": "…"}},
-      "sfx":      {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/linux-{arch}.standard.sfx",  "sha256": {"x86_64": "…", "aarch64": "…"}}
-    },
-    "macos": {
-      "shell": {"url": {"aarch64": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-macos-arm64",
-                        "x86_64":  "https://github.com/grafida/shell/releases/download/0.4.0/grafida-shell-macos-x86_64"},
-                "sha256": {"aarch64": "…", "x86_64": "…"}},
-      "sfx":   {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/macos-{arch}.standard.sfx",     "sha256": {"aarch64": "…", "x86_64": "…"}}
-    },
-    "windows": {
-      "shell": {"url": "https://github.com/grafida/shell/releases/download/0.3.0/grafida-shell-windows-x86_64.exe", "sha256": {"x86_64": "…"}},
-      "sfx":   {"url": "https://github.com/grafida/phpmicro/releases/download/sfx-…/windows-x86_64.standard.sfx",  "sha256": {"x86_64": "…"}}
-    }
-  },
-  "linux": {
-    "name": "myapp",
-    "desktop": "assets/myapp.desktop",
-    "icons": {"48": "assets/icons/48.png", "512": "assets/icons/512.png"},
-    "files": {"LICENSE.txt": "LICENSE.txt"},
-    "output": "build/dist/MyApp-{version}-linux-{debarch}.tar.gz"
-  },
-  "macos": {
-    "name": "MyApp",
-    "icon": "assets/MyApp.icns",
-    "infoPlist": {"NSHumanReadableCopyright": "…", "LSApplicationCategoryType": "public.app-category.productivity"},
-    "entitlements": {"shell": "build/shell.entitlements", "worker": "build/worker.entitlements"},
-    "resources": {"LICENSE.txt": "LICENSE.txt"},
-    "dmg": {
-      "background": "assets/dmg-background.tiff", "window": [640, 400], "iconSize": 128,
-      "positions": {"app": [160, 210], "applications": [480, 210]}, "volumeIcon": "assets/MyApp.icns"
-    },
-    "app": "build/shell-macos/{name}.app",
-    "output": "build/dist/MyApp-{version}-macos-{debarch}.dmg"
-  },
-  "windows": {
-    "name": "MyApp",
-    "icon": "assets/MyApp.ico",
-    "version": {"companyName": "…", "legalCopyright": "…", "workerDescription": "MyApp worker"},
-    "files": {"LICENSE.txt": "LICENSE.txt"},
-    "installer": {"script": "build/windows/installer.nsi", "defines": {"SHORTCUTS": "yes"}},
-    "tree": "build/shell-windows/{name}",
-    "output": "build/dist/MyApp-{version}-windows-{debarch}-Setup.exe"
-  }
-}
-```
-
-- **`phar.include`** lists directories, optionally narrowed by `name` globs, `notName` globs and
-  `notPath` prefixes. Anything under `vendor/` comes from a `composer install --no-dev
-  --no-scripts` of the app's `composer.json` + `composer.lock` in a staging directory, never from
-  the app's own `vendor/`, so dev dependencies never ship.
-- **`phar.ini`** becomes phpmicro's extra-INI block (`fd f6 69 e6`, a big-endian length, the ini
-  text) at the front of the `.phar` file. It applies before any PHP runs, so it can set what
-  `ini_set()` cannot.
-- **`runtimes`** are grouped by platform; a flat `runtimes` (the names straight under it) still
-  means Linux, and a mix of the two shapes is an error. A URL without `{arch}` names one file. When
-  the architectures come from different releases (an x86_64 pin added after the arm64 one was
-  verified), `url` maps each architecture to its own URL. They are pinned by the app. A download whose SHA-256 is not the pinned one is fatal,
-  and so is an architecture with no pin. A hash published beside the download is never consulted.
-  `--local NAME=PATH` substitutes a local file for testing an unreleased build; it is announced as
-  UNPINNED every time.
-  A runtime may instead be `{"latest": true}` (no `url`, no `sha256`): the newest shell, launcher
-  or SFX release is downloaded unpinned and announced as LATEST on every use, with the hash it had. The build then changes whenever a release is published.
+Two implementation details: `phar.ini` becomes phpmicro's extra-INI block (`fd f6 69 e6`, a
+big-endian length, the ini text) at the front of the `.phar` file, and a flat `runtimes` (the names straight under it)
+still means Linux, while a mix of the flat and the per-platform shape is an error.
 
 ## What is checked before a package is written
+
+The packaged worker is run before a package is written; see
+[the packaged worker is tested](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#the-packaged-worker-is-tested-before-it-is-written). In detail:
 
 On a machine of the target's OS and architecture (Linux, a Mac, or Windows x86_64; an x86_64 macOS
 worker also on an arm64 Mac with Rosetta 2, translated), the packaged worker is run:
@@ -183,16 +114,12 @@ MyApp.app/Contents/
   an error.
 - **The stub must be bare.** A stub with its PHAR still appended is refused: signing it would seal
   past the PHAR and corrupt it.
-- **`--no-sign` signs nothing** (`macos-app` and `macos-dmg`). The shell and the stub keep the ad-hoc *linker*
-  signature they were released with, which Apple Silicon needs to run them; the bundle is not sealed, so
-  `codesign --verify` and Gatekeeper reject it, and it cannot be notarised (`MACOS_NOTARY_PROFILE` with
-  `--no-sign` is an error). No hardened runtime is applied, and entitlements are ignored.
-- **Signing comes from the environment**, never the configuration: `MACOS_SIGN_IDENTITY` (a
-  "Developer ID Application: …" identity) or, without it, ad hoc. Inside-out (the stub, the shell,
-  the bundle), always with the **hardened runtime**, so an ad-hoc build runs under the same
-  restrictions as the notarised one. Each binary gets `macos.entitlements.<shell|worker>`, or none.
-  The signatures are then verified (`codesign --verify --strict`) and read back: the hardened
-  runtime on each binary, and exactly the configured entitlements.
+- **Signing** is described in [Unsigned builds](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#unsigned-builds) and
+  [Providing signing credentials](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#providing-signing-credentials). It goes inside out (the stub, the
+  shell, the bundle), always with the **hardened runtime**, so an ad-hoc build runs under the same restrictions as the
+  notarised one. Each binary gets `macos.entitlements.<shell|worker>`, or none. The signatures are then verified
+  (`codesign --verify --strict`) and read back: the hardened runtime on each binary, and exactly the configured
+  entitlements.
 - **The image** holds the bundle and an `/Applications` link. Finder lays it out (`macos.dmg`) through
   AppleScript, best-effort: it needs Finder's Automation permission, runs under a time limit, and
   styles only a volume mounted at exactly `/Volumes/<name>`; otherwise the image stays plain, with a
@@ -223,15 +150,11 @@ MyApp/
   `workerDescription` (default: "<name> worker"). The four-part version comes from `--app-version`:
   major.minor.patch, then 1000 for a release, or 0–9 / 10–100 / 900–999 for alpha / beta / rc N, so
   a pre-release sorts below its release.
-- **`--no-sign`** (`windows-tree`, `windows-installer`) leaves everything unsigned even when the environment
-  holds signing credentials; without credentials that is already the default.
-- **Signing comes from the environment**, with Jsign: Azure Trusted Signing (`WINDOWS_SIGN_ENDPOINT`,
-  `WINDOWS_SIGN_PROFILE` as `<account>/<profile>`, and `WINDOWS_SIGN_TOKEN`, an access token for
-  `https://codesigning.azure.net` the caller obtains), or a test keystore (`WINDOWS_SIGN_PKCS12`,
-  `WINDOWS_SIGN_PKCS12_PASSWORD`); neither leaves everything unsigned. The secrets reach Jsign as
-  `env:` references, never on its command line. Each signature is checked with `osslsigncode`: the
-  signed digest must match the file; the chain only when `WINDOWS_SIGN_CAFILE` names its roots. A
-  file with anything appended past its image is never signed (an installer is the one exception).
+- **Signing** (Azure Trusted Signing or a keystore, through Jsign, or nothing) and `--no-sign` are described in
+  [Providing signing credentials](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#providing-signing-credentials) and
+  [Unsigned builds](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#unsigned-builds). Each signature is checked with `osslsigncode`: the signed digest
+  must match the file; the chain only when `WINDOWS_SIGN_CAFILE` names its roots. A file with anything appended past
+  its image is never signed (an installer is the one exception).
 - **The installer is the app's own NSIS script** (`windows.installer.script`), compiled by
   `makensis` 3.08 or later, which runs on macOS and Linux. It gets the tree and the documented
   defines (`SRCDIR`, `OUTFILE`, `APPNAME`, `APPID`, `APPEXE`, `WORKEREXE`, `WORKERPHAR`, `ICONFILE`,
