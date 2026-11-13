@@ -7,7 +7,7 @@
 # origin to the worker and quits the shell, so a clean exit with the report in the log means: the
 # pins verified, the shell found its manifest and its worker beside itself, the stub loaded its
 # sibling .phar with the extra-INI block applied after its resources were rewritten (and its
-# signature appended), and WebView2 reached the worker through boson://app.
+# signature appended), and WebView2 reached the worker through shell://app.
 #
 # Usage (Git Bash on Windows, with a desktop session):
 #   scripts/e2e-windows.sh                    build the installer (PHP 8.4 and makensis on PATH), then test it
@@ -79,7 +79,7 @@ took=$(( $(date +%s) - start ))
 log="$INSTDIR/logs/shell.log"
 [ -f "$log" ] || fail "no log at $log"
 grep -q 'fixture: hello from the phar, memory_limit=321M' "$log" || fail "the worker did not run from its PHAR with the ini block"
-grep -q 'fixture-report: origin=boson://app' "$log" || fail "the page never reported"
+grep -q 'fixture-report: origin=shell://app' "$log" || fail "the page never reported"
 if tasklist //FI "IMAGENAME eq test-worker.exe" 2>/dev/null | grep -qi test-worker; then fail "a worker outlived the shell"; fi
 grep -E 'fixture|on WebView2' "$log" | cut -c26- | sed 's/^/  /'
 

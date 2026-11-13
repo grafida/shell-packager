@@ -5,7 +5,7 @@
 # reports its origin to the worker and quits the shell, so a clean exit with the report in the log
 # means: the pins verified, the launcher's library check passed, the shell found its manifest and
 # worker, the SFX loaded the PHAR from its sibling file with the extra-INI block applied, and the
-# webview reached the worker through boson://app.
+# webview reached the worker through shell://app.
 #
 # Usage: scripts/e2e-linux.sh [ARCH]   (default: this machine's)
 # Needs WebKitGTK 4.1 + GTK 3 installed, a display or xvfb-run, tar, and network access the first
@@ -46,7 +46,7 @@ timeout 120 "${run[@]}" > "$WORK/stdout" 2> "$WORK/stderr" || code=$?
 
 log="$WORK/x/test-app/logs/shell.log"
 grep -q 'fixture: hello from the phar, memory_limit=321M' "$log" || fail "the worker did not run from its PHAR with the ini block"
-grep -q 'fixture-report: origin=boson://app' "$log" || fail "the page never reported"
+grep -q 'fixture-report: origin=shell://app' "$log" || fail "the page never reported"
 if pgrep -f "$WORK/x/test-app/test-worker" >/dev/null; then fail "a worker outlived the shell"; fi
 
 echo "ok: the packaged fixture ran end to end on $ARCH"

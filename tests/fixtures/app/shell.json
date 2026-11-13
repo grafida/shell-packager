@@ -1,7 +1,7 @@
 {
     "id": "test.packager.app",
     "title": "Packager Test",
-    "scheme": "boson",
+    "scheme": "shell",
     "window": {
         "width": 640,
         "height": 480

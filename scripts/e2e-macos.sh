@@ -7,7 +7,7 @@
 # fixture's page reports its origin to the worker and quits the shell, so a clean exit with the
 # report in the log means: the pins verified, the shell found its manifest in Contents/Resources
 # and its worker beside itself, the signed stub loaded its PHAR from ../Resources under the hardened
-# runtime with the extra-INI block applied, and the webview reached the worker through boson://app.
+# runtime with the extra-INI block applied, and the webview reached the worker through shell://app.
 #
 # Usage: scripts/e2e-macos.sh        STYLE=1 also runs the Finder layout (needs Finder's Automation
 #                                    permission; CI has neither, so it builds a plain image)
@@ -60,7 +60,7 @@ took=$(( $(date +%s) - start ))
 log="$APP/Contents/Resources/logs/shell.log"
 [ -f "$log" ] || fail "no log at $log"
 grep -q 'fixture: hello from the phar, memory_limit=321M' "$log" || fail "the worker did not run from its PHAR with the ini block"
-grep -q 'fixture-report: origin=boson://app' "$log" || fail "the page never reported"
+grep -q 'fixture-report: origin=shell://app' "$log" || fail "the page never reported"
 if pgrep -f "$APP/Contents/MacOS/test-worker" >/dev/null; then fail "a worker outlived the shell"; fi
 
 echo "ok: the packaged fixture ran end to end through LaunchServices in ${took}s"
