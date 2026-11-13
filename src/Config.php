@@ -255,7 +255,7 @@ final readonly class Config
                     throw new PackagerException("runtimes.{$platform}.{$name} must be an object.");
                 }
 
-                $out[$platform][(string) $name] = Runtime::fromArray((string) $name, $runtime);
+                $out[$platform][(string) $name] = Runtime::fromArray((string) $name, $runtime, $platform);
             }
         }
 

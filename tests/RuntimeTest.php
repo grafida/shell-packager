@@ -63,4 +63,42 @@ final class RuntimeTest extends TestCase
             }
         }
     }
+
+    public function testLatestNamesTheNewestReleasePerPlatformAndArchitecture(): void
+    {
+        $shell = Runtime::fromArray('shell', ['latest' => true], 'macos');
+
+        self::assertTrue($shell->latest);
+        self::assertSame('https://github.com/grafida/shell/releases/latest/download/grafida-shell-macos-arm64', $shell->url(Arch::Aarch64));
+        self::assertSame('https://github.com/grafida/shell/releases/latest/download/grafida-shell-macos-x86_64', $shell->url(Arch::X86_64));
+
+        $sfx = Runtime::fromArray('sfx', ['latest' => true], 'linux');
+
+        self::assertSame('https://github.com/grafida/phpmicro/releases/download/sfx-latest/linux-aarch64.standard.sfx', $sfx->url(Arch::Aarch64));
+        self::assertSame('https://github.com/grafida/shell/releases/latest/download/grafida-launcher-linux-x86_64', Runtime::fromArray('launcher', ['latest' => true], 'linux')->url(Arch::X86_64));
+    }
+
+    public function testLatestCannotBeMixedWithAPin(): void
+    {
+        $this->expectException(PackagerException::class);
+        Runtime::fromArray('shell', ['latest' => true, 'url' => 'https://x/y', 'sha256' => ['aarch64' => self::A]]);
+    }
+
+    public function testOnlyTrueMeansLatest(): void
+    {
+        $this->expectException(PackagerException::class);
+        Runtime::fromArray('shell', ['latest' => false]);
+    }
+
+    public function testThereIsNoLatestForARuntimeThatDoesNotExistOnThePlatform(): void
+    {
+        $this->expectException(PackagerException::class);
+        Runtime::fromArray('launcher', ['latest' => true], 'macos');
+    }
+
+    public function testLatestWorksInAConfiguredRuntimesSection(): void
+    {
+        // Grouped by platform, through Config::load().
+        self::assertTrue(Runtime::fromArray('sfx', ['latest' => true], 'windows')->latest);
+    }
 }

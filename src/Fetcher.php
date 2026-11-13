@@ -66,6 +66,10 @@ final class Fetcher
             return $path;
         }
 
+        if ($runtime->latest) {
+            return $this->fetchLatest($runtime, $arch);
+        }
+
         $pin  = $runtime->pin($arch);
         $url  = $runtime->url($arch);
         $dir  = $this->cacheDir . '/' . $pin;
@@ -101,6 +105,41 @@ final class Fetcher
         return $path;
     }
 
+    /**
+     * The newest release, which has no pin to check against: it is cached under the hash it turns
+     * out to have, and announced as LATEST on stderr every time, with the URL and the hash it
+     * had, because the build changes whenever a new release is published.
+     */
+    private function fetchLatest(Runtime $runtime, Arch $arch): string
+    {
+        $url = $runtime->url($arch);
+
+        if (!is_dir($this->cacheDir) && !@mkdir($this->cacheDir, 0o755, true) && !is_dir($this->cacheDir)) {
+            throw new PackagerException("Cannot create the cache directory {$this->cacheDir}.");
+        }
+
+        $partial   = $this->cacheDir . '/latest-' . getmypid() . '-' . bin2hex(random_bytes(4)) . '.part';
+        $this->download($url, $partial);
+        $hash      = (string) hash_file('sha256', $partial);
+        $dir       = $this->cacheDir . '/' . $hash;
+        $path      = $dir . '/' . self::basename($url);
+
+        if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
+            @unlink($partial);
+            throw new PackagerException("Cannot create the cache directory {$dir}.");
+        }
+
+        rename($partial, $path);
+        chmod($path, 0o755);
+
+        fwrite(\STDERR, "WARNING: {$runtime->name} for {$arch->value} is LATEST, not pinned: the newest release is used, so this build changes\n"
+            . "  when a new one is published, possibly with incompatible changes.\n"
+            . "  URL:    {$url}\n  sha256: {$hash}\n"
+            . "  To pin what was just used, take the same asset from a specific release and record its sha256.\n");
+
+        return $path;
+    }
+
     private function download(string $url, string $to): void
     {
         $out = fopen($to, 'wb');
@@ -119,8 +158,8 @@ final class Fetcher
             \CURLOPT_USERAGENT      => 'grafida-shell-packager',
             \CURLOPT_PROTOCOLS      => \CURLPROTO_HTTPS | \CURLPROTO_FILE,
         ]);
-        $ok    = curl_exec($curl);
-        $error = curl_error($curl);
+        $ok       = curl_exec($curl);
+        $error    = curl_error($curl);
         fclose($out);
 
         if ($ok !== true) {

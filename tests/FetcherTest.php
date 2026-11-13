@@ -95,4 +95,18 @@ final class FetcherTest extends TestCase
 
         self::assertSame($this->dir . '/src/tool-x86_64', $fetcher->fetch($this->runtime(str_repeat('0', 64)), Arch::X86_64));
     }
+
+    public function testLatestHasNoPinAndIsCachedUnderTheHashItHas(): void
+    {
+        $dir     = \PHP_OS_FAMILY === 'Windows' ? '/' . str_replace('\\', '/', $this->dir) : $this->dir;
+        $runtime = new Runtime('tool', 'file://' . $dir . '/src/tool-{arch}', [], true);
+        $fetcher = new Fetcher($this->dir . '/cache');
+        $hash    = hash('sha256', 'the x86_64 tool');
+
+        $path = $fetcher->fetch($runtime, Arch::X86_64);
+
+        self::assertSame($this->dir . '/cache/' . $hash . '/tool-x86_64', $path);
+        self::assertSame('the x86_64 tool', file_get_contents($path));
+        self::assertSame([], glob($this->dir . '/cache/*.part'));
+    }
 }

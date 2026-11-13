@@ -1,3 +1,7 @@
+shell-packager 0.5.0
+================================================================================
++ A runtime may be `{"latest": true}`: the newest shell, launcher or SFX release, unpinned, with a warning
+
 shell-packager 0.4.0
 ================================================================================
 + macOS x86_64: `macos-app` and `macos-dmg --arch=x86_64` build an Intel bundle and image (`{debarch}` `amd64`)

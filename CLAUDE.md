@@ -13,7 +13,9 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   separate `<name>.phar` (on macOS, `../Resources/<basename>.phar`). Signing a stub with the PHAR
   *appended* puts the signature past the PHAR, corrupts it, and the app dies at startup. Never
   re-combine them.
-- Every downloaded binary is pinned and verified by SHA-256 before use.
+- Every downloaded binary is pinned and verified by SHA-256 before use. The one exception is a runtime the app
+  explicitly sets to `{"latest": true}`: it is downloaded unpinned and announced as LATEST (with its URL and hash) on
+  every use. There is no silent "no hash" path.
 
 - **Every name comes from the app's manifest** (`id`, `title`, `worker.binary`), never from the
   packaging config, so the shell and the package cannot disagree. The desktop entry is

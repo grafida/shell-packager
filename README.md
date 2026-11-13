@@ -112,6 +112,8 @@ desktop entry and icons (and is the window's Wayland `app_id`), `title` appears 
   and so is an architecture with no pin. A hash published beside the download is never consulted.
   `--local NAME=PATH` substitutes a local file for testing an unreleased build; it is announced as
   UNPINNED every time.
+  A runtime may instead be `{"latest": true}` (no `url`, no `sha256`): the newest shell, launcher
+  or SFX release is downloaded unpinned and announced as LATEST on every use, with the hash it had. The build then changes whenever a release is published.
 
 ## What is checked before a package is written
 
