@@ -1,5 +1,6 @@
 shell-packager 0.5.0
 ================================================================================
++ `--no-sign` for `macos-app`, `macos-dmg`, `windows-tree` and `windows-installer`: a package with nothing signed
 + A runtime may be `{"latest": true}`: the newest shell, launcher or SFX release, unpinned, with a warning
 
 shell-packager 0.4.0

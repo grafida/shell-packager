@@ -183,6 +183,10 @@ MyApp.app/Contents/
   an error.
 - **The stub must be bare.** A stub with its PHAR still appended is refused: signing it would seal
   past the PHAR and corrupt it.
+- **`--no-sign` signs nothing** (`macos-app` and `macos-dmg`). The shell and the stub keep the ad-hoc *linker*
+  signature they were released with, which Apple Silicon needs to run them; the bundle is not sealed, so
+  `codesign --verify` and Gatekeeper reject it, and it cannot be notarised (`MACOS_NOTARY_PROFILE` with
+  `--no-sign` is an error). No hardened runtime is applied, and entitlements are ignored.
 - **Signing comes from the environment**, never the configuration: `MACOS_SIGN_IDENTITY` (a
   "Developer ID Application: …" identity) or, without it, ad hoc. Inside-out (the stub, the shell,
   the bundle), always with the **hardened runtime**, so an ad-hoc build runs under the same
@@ -219,6 +223,8 @@ MyApp/
   `workerDescription` (default: "<name> worker"). The four-part version comes from `--app-version`:
   major.minor.patch, then 1000 for a release, or 0–9 / 10–100 / 900–999 for alpha / beta / rc N, so
   a pre-release sorts below its release.
+- **`--no-sign`** (`windows-tree`, `windows-installer`) leaves everything unsigned even when the environment
+  holds signing credentials; without credentials that is already the default.
 - **Signing comes from the environment**, with Jsign: Azure Trusted Signing (`WINDOWS_SIGN_ENDPOINT`,
   `WINDOWS_SIGN_PROFILE` as `<account>/<profile>`, and `WINDOWS_SIGN_TOKEN`, an access token for
   `https://codesigning.azure.net` the caller obtains), or a test keystore (`WINDOWS_SIGN_PKCS12`,

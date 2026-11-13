@@ -113,6 +113,10 @@ final class MacApp
      */
     public static function sign(Config $config, string $app, Codesign $codesign): void
     {
+        if ($codesign->skip) {
+            return;
+        }
+
         $macos  = $config->macos();
         $worker = "{$app}/Contents/MacOS/{$config->workerBinary}";
         $shell  = "{$app}/Contents/MacOS/{$macos->name}";

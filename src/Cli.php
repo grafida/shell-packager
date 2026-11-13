@@ -49,6 +49,9 @@ final class Cli
           --output=FILE        where to write (overrides linux.output, macos.app, macos.output,
                                windows.tree or windows.output)
           --app=APP            macos-dmg: image this signed bundle instead of building one
+          --no-sign            macos-app, macos-dmg, windows-tree, windows-installer: sign nothing, whatever the
+                               environment says. macOS keeps the binaries' own ad-hoc linker signature and does
+                               not seal the bundle. See the caveats in the documentation.
           --no-style           macos-dmg: no Finder layout (it needs Finder and its Automation
                                permission; a CI runner has neither)
           --local=NAME=PATH    use a local file for runtime NAME (shell, launcher, sfx). UNPINNED:
@@ -141,6 +144,18 @@ final class Cli
     }
 
     /** @param array<string, list<string>> $options */
+    private static function codesign(array $options): Codesign
+    {
+        return isset($options['no-sign']) ? Codesign::unsigned() : Codesign::fromEnvironment();
+    }
+
+    /** @param array<string, list<string>> $options */
+    private static function authenticode(array $options): Authenticode
+    {
+        return isset($options['no-sign']) ? new Authenticode('none') : Authenticode::fromEnvironment();
+    }
+
+    /** @param array<string, list<string>> $options */
     private static function macosArch(array $options): Arch
     {
         return isset($options['arch']) ? Arch::parse(self::one($options, 'arch')) : Arch::Aarch64;
@@ -163,7 +178,7 @@ final class Cli
         $config   = Config::load(self::one($options, 'config'));
         $version  = self::one($options, 'app-version');
         $output   = isset($options['output']) ? self::one($options, 'output') : MacDmg::outputPath($config, $version, self::macosArch($options));
-        $codesign = Codesign::fromEnvironment();
+        $codesign = self::codesign($options);
         $work     = null;
 
         if (isset($options['app'])) {
@@ -173,7 +188,10 @@ final class Cli
                 throw new PackagerException("--app={$app} is not an app bundle.");
             }
 
-            Codesign::verify($app);
+            if (!$codesign->skip) {
+                Codesign::verify($app);
+            }
+
             $arch = self::macosArch($options);
 
             // The image is named after --arch: an arm64 bundle must not become an amd64 image.
@@ -221,7 +239,7 @@ final class Cli
         $arch    = self::macosArch($options);
 
         $config->macos();
-        $codesign = Codesign::fromEnvironment();
+        $codesign = self::codesign($options);
         $fetcher  = self::fetcher($options);
         $runtimes = [];
 
@@ -243,12 +261,17 @@ final class Cli
             }
 
             MacApp::assemble($config, $runtimes, $payload, $app, $version, $arch);
-            self::say('Signing (' . $codesign->describe() . ', hardened runtime)');
+            if ($codesign->skip) {
+                self::say('NOT signing (--no-sign): the binaries keep the ad-hoc linker signature they came with, and the bundle is not sealed.');
+            } else {
+                self::say('Signing (' . $codesign->describe() . ', hardened runtime)');
+            }
+
             MacApp::sign($config, $app, $codesign);
 
             if ($check) {
                 $header = WorkerCheck::handshakeAt("{$app}/Contents/MacOS/{$config->workerBinary}");
-                self::say('Worker check' . WorkerCheck::translation($arch, Platform::Macos) . ': the ini block applies, and the signed worker in the bundle answered ' . $header);
+                self::say('Worker check' . WorkerCheck::translation($arch, Platform::Macos) . ': the ini block applies, and the worker in the bundle answered ' . $header);
             } else {
                 self::say('Worker check skipped' . (isset($options['no-check'])
                     ? '.'
@@ -264,7 +287,7 @@ final class Cli
     {
         $config = Config::load(self::one($options, 'config'));
         $tree   = isset($options['output']) ? self::one($options, 'output') : WindowsTree::outputPath($config);
-        self::buildTree($config, $options, $tree, Authenticode::fromEnvironment());
+        self::buildTree($config, $options, $tree, self::authenticode($options));
         self::say("Done: {$tree}");
 
         return 0;
@@ -276,7 +299,7 @@ final class Cli
         $config  = Config::load(self::one($options, 'config'));
         $version = self::one($options, 'app-version');
         $output  = isset($options['output']) ? self::one($options, 'output') : WindowsTree::installerPath($config, $version);
-        $signer  = Authenticode::fromEnvironment();
+        $signer  = self::authenticode($options);
         $work    = Filesystem::tempDir('windows-installer');
 
         try {
@@ -454,7 +477,7 @@ final class Cli
     private static function options(array $args): array
     {
         $options = [];
-        $flags   = ['no-check', 'no-style', 'overlay'];
+        $flags   = ['no-check', 'no-sign', 'no-style', 'overlay'];
 
         for ($i = 0, $n = \count($args); $i < $n; $i++) {
             if (!str_starts_with($args[$i], '--')) {

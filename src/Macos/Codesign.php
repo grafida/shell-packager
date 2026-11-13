@@ -17,7 +17,9 @@ use Grafida\ShellPackager\Process;
 /**
  * Code signing (grafida/grafida#88). The identity comes from the environment, never from an app's
  * repository: `MACOS_SIGN_IDENTITY` names a "Developer ID Application: …" identity in the keychain.
- * Without it every binary is signed **ad hoc**.
+ * Without it every binary is signed **ad hoc**. {@see unsigned()} (`--no-sign`) signs nothing: the binaries stay
+ * as downloaded (both are ad-hoc *linker*-signed, which Apple Silicon needs to run them) and the bundle is
+ * not sealed.
  *
  * Either way it is signed with the **hardened runtime** (`--options runtime`), so an ad-hoc build
  * runs under the same restrictions as the notarised one: an entitlement a binary needs shows up
@@ -27,8 +29,14 @@ final readonly class Codesign
 {
     public const IDENTITY_ENV = 'MACOS_SIGN_IDENTITY';
 
-    public function __construct(public ?string $identity)
+    public function __construct(public ?string $identity, public bool $skip = false)
     {
+    }
+
+    /** Sign nothing: no identity, no ad-hoc signature, no signature checks. */
+    public static function unsigned(): self
+    {
+        return new self(null, true);
     }
 
     public static function fromEnvironment(): self
@@ -45,12 +53,16 @@ final readonly class Codesign
 
     public function describe(): string
     {
-        return $this->identity === null ? 'ad hoc' : $this->identity;
+        return $this->skip ? 'unsigned' : ($this->identity ?? 'ad hoc');
     }
 
     /** Signs a binary or a bundle; $entitlements is a .plist, or null for none. */
     public function sign(string $path, ?string $entitlements): void
     {
+        if ($this->skip) {
+            return;
+        }
+
         $command = ['codesign', '--force', '--options', 'runtime', '--sign', $this->identity ?? '-'];
 
         if ($this->identity !== null) {
@@ -69,7 +81,7 @@ final readonly class Codesign
     /** Signs a disk image (no hardened runtime: it is not code). Developer ID only. */
     public function signImage(string $path): void
     {
-        if ($this->identity === null) {
+        if ($this->identity === null || $this->skip) {
             return;
         }
 

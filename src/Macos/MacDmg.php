@@ -67,6 +67,10 @@ final class MacDmg
         $macos   = $config->macos();
         $profile = self::notaryProfile();
 
+        if ($profile !== null && $codesign->skip) {
+            throw new PackagerException(self::NOTARY_ENV . ' is set but --no-sign was given: notarisation needs a Developer ID signature.');
+        }
+
         if ($profile !== null && $codesign->adHoc()) {
             throw new PackagerException(self::NOTARY_ENV . ' is set but ' . Codesign::IDENTITY_ENV . ' is not: notarisation needs a Developer ID signature.');
         }
