@@ -36,8 +36,8 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   without before it is kept (grafida/grafida#88).
 - **The AppImage (`Linux\AppImage`) is `runtime ++ squashfs`, assembled in PHP with Homebrew's `mksquashfs`**,
   not appimagetool (a Linux ELF; the packages are built on a Mac). The launcher is `AppRun`; the desktop entry and
-  largest icon sit at the AppDir root. Reproducibility depends on `env -u SOURCE_DATE_EPOCH mksquashfs … -repro-time
-  <mtime> -all-root -no-xattrs`: mksquashfs refuses `-repro-time` together with that variable. Update information is
+  largest icon sit at the AppDir root. Reproducibility depends on `env -u SOURCE_DATE_EPOCH mksquashfs … -mkfs-time/-all-time/-root-time
+  <mtime> -all-root -no-xattrs`: mksquashfs refuses explicit times together with that variable (`-repro-time` is 4.6+, absent from Ubuntu 22.04's 4.5). Update information is
   written into the runtime's `.upd_info` section, located through the ELF section headers, never by offset. The
   pinned runtime's compressors are zstd and zlib (checked in its binary): do not switch to xz. WebKitGTK is never
   bundled. `AppImageTest` checks the structure with `unsquashfs -o <runtime size>`; `SHELL_PACKAGER_TEST_APPIMAGE_RUNTIME`

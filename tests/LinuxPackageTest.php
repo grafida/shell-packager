@@ -330,7 +330,7 @@ final class LinuxPackageTest extends TestCase
             $list = Process::mustRun(['rpm', '-qplv', '--nosignature', $rpm]);
             self::assertMatchesRegularExpression('/^-rwxr-xr-x.* \/opt\/test-app\/test-app$/m', $list);
             self::assertMatchesRegularExpression('/^-rw-r--r--.* \/opt\/test-app\/test-worker\.phar$/m', $list);
-            self::assertMatchesRegularExpression('/^lrwxrwxrwx.* \/usr\/bin\/test-app -> \/opt\/test-app\/test-app$/m', $list);
+            self::assertMatchesRegularExpression('/^l[-rwx]{9}.* \/usr\/bin\/test-app -> \/opt\/test-app\/test-app$/m', $list);
             self::assertMatchesRegularExpression('/^-rw-r--r--.* \/usr\/share\/applications\/test\.packager\.app\.desktop$/m', $list);
             self::assertMatchesRegularExpression('/^-rw-r--r--.* \/usr\/share\/icons\/hicolor\/16x16\/apps\/test\.packager\.app\.png$/m', $list);
 

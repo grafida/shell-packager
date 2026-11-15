@@ -102,14 +102,15 @@ final class AppImage
             self::stage($config, $runtimes, $payload, $appDir, $mtime);
 
             $squashfs = $work . '/image.squashfs';
-            // mksquashfs refuses -repro-time together with SOURCE_DATE_EPOCH, which it reads itself;
-            // the time is passed explicitly (it is that variable's value, or the build time).
+            // mksquashfs reads SOURCE_DATE_EPOCH itself and then refuses explicit times, so it is unset and the
+            // time (that variable's value, or the build time) is passed explicitly. -repro-time is not used:
+            // squashfs-tools 4.5 (Ubuntu 22.04) does not know it, and these three exist from 4.4 on.
             Process::mustRun([
                 'env', '-u', 'SOURCE_DATE_EPOCH', 'mksquashfs', $appDir, $squashfs,
                 '-noappend', '-quiet', '-no-progress',
                 '-comp', 'zstd', '-b', '128K',
                 '-all-root', '-no-xattrs', '-root-mode', '0755',
-                '-repro-time', (string) $mtime,
+                '-mkfs-time', (string) $mtime, '-all-time', (string) $mtime, '-root-time', (string) $mtime,
             ]);
 
             Filesystem::mkdir(\dirname($output));

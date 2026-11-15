@@ -1,3 +1,7 @@
+shell-packager 0.5.1
+================================================================================
+# [MEDIUM] `linux-appimage` failed with squashfs-tools 4.5 (Ubuntu 22.04): it has no `-repro-time`
+
 shell-packager 0.5.0
 ================================================================================
 + `linux-deb` and `linux-rpm`: packages under `/opt/<name>`, built by a pinned nfpm 2.49.0 (grafida/grafida#87)
