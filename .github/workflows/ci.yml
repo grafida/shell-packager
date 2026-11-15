@@ -22,7 +22,7 @@ jobs:
       - name: PHP syntax
         run: find bin src tests -type f \( -name '*.php' -o -path 'bin/*' \) -not -path 'tests/fixtures/*/vendor/*' -print0 | xargs -0 -n1 php -l
       - name: Shell scripts
-        run: shellcheck scripts/*.sh resources/linux/install.sh
+        run: shellcheck scripts/*.sh resources/linux/*.sh
       - name: PHPStan (level max)
         run: composer linter:check
 
@@ -46,6 +46,14 @@ jobs:
         run: |
           sfx="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch="$(uname -m)" | sed -n 's/^sfx: //p')"
           echo "SHELL_PACKAGER_TEST_SFX=$sfx" >> "$GITHUB_ENV"
+      # The .deb and .rpm are read back (grafida/grafida#87) with the pinned nfpm and the rpm tool.
+      - name: Fetch the pinned nfpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          nfpm="$(bin/shell-packager fetch --config=tests/fixtures/app/shell-package.json --arch="$(uname -m)" --nfpm | sed -n 's/^nfpm: //p')"
+          mkdir "$RUNNER_TEMP/nfpm" && tar -xzf "$nfpm" -C "$RUNNER_TEMP/nfpm" nfpm
+          echo "SHELL_PACKAGER_TEST_NFPM=$RUNNER_TEMP/nfpm/nfpm" >> "$GITHUB_ENV"
       # The Windows packaging runs on any host (the Mac builds Grafida's): the resource writer on the
       # real pinned binaries, signing with a throwaway certificate, and the installer (grafida/grafida#91).
       - name: Windows packaging tools (makensis 3.08, osslsigncode, a pinned Jsign) and pins
