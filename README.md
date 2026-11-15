@@ -19,11 +19,15 @@ one app's layout: everything app-specific comes from the app's configuration and
 composer require --dev grafida/shell-packager
 
 vendor/bin/shell-packager linux-tarball --config=shell-package.json --arch=x86_64 --app-version=1.0.0
+vendor/bin/shell-packager linux-appimage --config=shell-package.json --arch=x86_64 --app-version=1.0.0
+vendor/bin/shell-packager linux-pkgbuild --config=shell-package.json --app-version=1.0.0
 vendor/bin/shell-packager macos-app --config=shell-package.json --app-version=1.0.0
 vendor/bin/shell-packager macos-dmg --config=shell-package.json --app-version=1.0.0
 vendor/bin/shell-packager windows-tree --config=shell-package.json --app-version=1.0.0
 vendor/bin/shell-packager windows-installer --config=shell-package.json --app-version=1.0.0
 vendor/bin/shell-packager phar  --config=shell-package.json --output=build/app-worker.phar
+vendor/bin/shell-packager linux-deb --config=shell-package.json --arch=x86_64 --app-version=1.0.0
+vendor/bin/shell-packager linux-rpm --config=shell-package.json --arch=aarch64 --app-version=1.0.0
 vendor/bin/shell-packager fetch --config=shell-package.json --arch=aarch64 [--platform=linux|macos|windows]
 ```
 
@@ -85,9 +89,111 @@ its `Exec` (field codes dropped, quotes removed) ends in `/<linux.name>`; an ent
 starts anything else is left alone, and `install.sh` says so. `--uninstall` removes only this
 build's own entry and icons.
 
+## The Linux `.deb` and `.rpm`
+
+`linux-deb` and `linux-rpm` (`--arch`, `--app-version`, `--output` as for the tarball) write the same
+files as the tarball with a pinned [nfpm](https://nfpm.goreleaser.com) 2.49.0:
+
+```
+/opt/myapp/                      myapp, grafida-shell, myapp-worker, myapp-worker.phar, shell.json, linux.files
+/usr/bin/myapp                   symlink to /opt/myapp/myapp (the launcher resolves its real path)
+/usr/share/applications/<id>.desktop              Exec=myapp (on the PATH), Icon and StartupWMClass = the id
+/usr/share/icons/hicolor/<n>x<n>/apps/<id>.png
+```
+
+There is no `install.sh`: the package manager installs, upgrades and removes. WebKitGTK and GTK are
+dependencies, never bundled, and since they are the *shell's* needs they are the packager's defaults, not
+the app's: `.deb` `libwebkit2gtk-4.1-0`, `libgtk-3-0`; `.rpm` `webkit2gtk4.1`, `gtk3`. Architectures are
+`amd64`/`arm64` (`.deb`) and `x86_64`/`aarch64` (`.rpm`). A hyphen in `--app-version` becomes `~`
+(`0.5-rc1` is packaged as `0.5~rc1`, which sorts before `0.5`).
+
+The package metadata is the app's, under `linux.package`:
+
+```jsonc
+"package": {
+  "maintainer": "Jane Doe <jane@example.com>",     // required
+  "license": "GPL-3.0-or-later",                   // required
+  "homepage": "https://example.com",
+  "description": "One paragraph.",                  // default: the manifest title
+  "section": "utils",                               // .deb only
+  "depends": {"deb": ["xdg-utils"], "rpm": ["xdg-utils"]},   // added to the shell's
+  "output": {"deb": "build/dist/{name}-{version}-linux-{debarch}.deb", "rpm": "build/dist/{name}-{version}-linux-{arch}.rpm"}
+}
+```
+
+`linux.name` must be a valid package name (lower case letters, digits, `.` `+` `-`), and no field may
+contain a `$` (nfpm expands environment variables in its configuration). Each package gets a `.sha256`.
+
+Maintainer scripts (POSIX `sh`, from `resources/linux/`), identical for both formats:
+
+- **post-install** refreshes the desktop-entry and hicolor icon caches when their tools exist, and honours
+  `linux.replaces` for *system-wide* entries only: `/usr/share/applications/<old>.desktop` and its icons are
+  removed when its `Exec` is `<linux.name>` or ends in `/<linux.name>`. It never reads or writes a home
+  directory: a per-user entry from the tarball's `install.sh` is the user's to remove (`./install.sh
+  --uninstall`).
+- **post-removal** refreshes the caches and, on a final removal only (`remove`/`purge`, or an RPM's last
+  instance; never an upgrade), deletes `/opt/<name>` with whatever the app wrote there. User data lives in
+  the user's home and is never touched.
+
+⚠️ A relative `logDir` in the manifest lands beside the shell (the fixture's does), which users cannot
+write under `/opt`; check what an app installed this way writes where.
+
+nfpm is pinned in the packager (`Linux\Nfpm`), not in the app: one archive per build host (macOS or Linux,
+x86_64 or aarch64), each with the SHA-256 of the bytes downloaded from the release, verified like every
+other binary. `fetch --nfpm` fetches it; `--local nfpm=PATH` uses an unpinned binary (announced). The
+packages are not signed. An unsigned `.rpm` needs `--nogpgcheck` (dnf) or `--nosignature` (rpm).
+
 ⚠️ **The SFX stub and its `.phar` are two files and must stay two.** A stub with the payload
 appended cannot be code-signed: the signature lands past the PHAR and corrupts it. Linux does not
 sign, but the same layout serves macOS and Windows.
+
+## The AppImage
+
+```
+AppRun                 the launcher (static); the type-2 runtime execs it
+grafida-shell          the shell
+myapp-worker, .phar    the phpmicro SFX stub and its payload (still two files)
+shell.json
+<id>.desktop           as in the tarball: Exec, Icon and StartupWMClass forced
+<id>.png               the largest linux.icons entry, at the root as the AppImage spec wants
+.DirIcon -> <id>.png
+usr/share/icons/hicolor/<n>x<n>/apps/<id>.png
+…                      linux.files
+```
+
+An AppImage is the pinned **static type-2 runtime** (`runtimes.linux.appimage-runtime`, one URL and SHA-256 per
+architecture, taken from the downloaded bytes of a release of
+[AppImage/type2-runtime](https://github.com/AppImage/type2-runtime)) followed by a squashfs image of that
+directory. The static runtime needs no `libfuse2`, which Ubuntu 22.04 lacks. WebKitGTK and GTK are **never bundled**:
+the AppImage uses the system's, and the launcher's alert says what is missing.
+
+- **`mksquashfs` is required** (Homebrew `squashfs`, apt `squashfs-tools`); the packager stops with a message
+  before downloading anything when it is missing. `appimagetool` is not used: it is a Linux ELF and the packages are
+  built on a Mac, and all it adds to `runtime ++ squashfs` is the update information (done here) and the signature
+  digests (not used).
+- The image is zstd-compressed (the pinned runtime is built with zstd and zlib), owned by root, without extended
+  attributes, with every timestamp the build time and entries sorted by `mksquashfs`: with the same
+  `SOURCE_DATE_EPOCH` the AppImage is byte-identical on any host.
+- **Update information** (`linux.appimage.updateInformation`, e.g.
+  `gh-releases-zsync|user|repo|latest|myapp-*-linux-{debarch}.AppImage.zsync`; `{name}`, `{arch}`, `{debarch}` are
+  expanded) is written into the runtime's `.upd_info` section, found by name in the ELF section headers, NUL-padded
+  to its 1024 bytes. It is only embedded: no updater is installed, and the `.zsync` file is not made.
+- `--output`, or `linux.appimage.output` (`{name}`, `{version}`, `{arch}`, `{debarch}`); a `.sha256` is written beside it.
+  The worker check runs as for the tarball.
+
+## The Arch PKGBUILD
+
+`linux-pkgbuild --app-version=V [--arch=ARCH]… [--output=FILE]` writes a `PKGBUILD` for the tarballs `linux-tarball`
+already built (without `--arch`, whichever of the two exist; with it, each must). The `source_<arch>` URL comes from
+`linux.pkgbuild.source` (where *you* publish the tarball; `{name}`, `{version}`, `{arch}`, `{debarch}`), the
+`sha256sums_<arch>` from the tarball files. The package depends on `webkit2gtk-4.1`, `gtk3`, `hicolor-icon-theme` and
+`dbus` plus `linux.pkgbuild.depends`; installs the tarball under `/opt/<name>` (without `install.sh` and the icon
+folder) with `/usr/bin/<name>` linked to the launcher, the desktop entry in `/usr/share/applications` and the icons in
+the hicolor theme; and sets `!strip !debug`, so makepkg leaves the static launcher, the shell and the SFX stub alone. A
+version like `1.0.0-rc1` is `1.0.0_rc1` for pacman. Nothing is published to the AUR. `linux.pkgbuild` takes `source`,
+`description`, `url`, `license` (SPDX list; **required**), `maintainer`, `depends`, `optdepends`, `pkgrel` and `output`.
+A licence outside Arch's common ones needs its text in `/usr/share/licenses/<name>/`: add it to `linux.files`
+and extend the file by hand, or use a common identifier.
 
 ## The macOS bundle and image
 

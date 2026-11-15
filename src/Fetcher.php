@@ -56,6 +56,11 @@ final class Fetcher
         $this->local[$runtime] = $path;
     }
 
+    public function hasLocal(string $runtime): bool
+    {
+        return isset($this->local[$runtime]);
+    }
+
     /** Returns the path of a verified copy of $runtime for $arch. */
     public function fetch(Runtime $runtime, Arch $arch): string
     {

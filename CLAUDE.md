@@ -34,6 +34,18 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   handshake runs on the **signed stub inside the finished bundle** (`handshakeAt`), under the
   hardened runtime with the entitlements it was given: that is the test any entitlement must fail
   without before it is kept (grafida/grafida#88).
+- **The AppImage (`Linux\AppImage`) is `runtime ++ squashfs`, assembled in PHP with Homebrew's `mksquashfs`**,
+  not appimagetool (a Linux ELF; the packages are built on a Mac). The launcher is `AppRun`; the desktop entry and
+  largest icon sit at the AppDir root. Reproducibility depends on `env -u SOURCE_DATE_EPOCH mksquashfs … -repro-time
+  <mtime> -all-root -no-xattrs`: mksquashfs refuses `-repro-time` together with that variable. Update information is
+  written into the runtime's `.upd_info` section, located through the ELF section headers, never by offset. The
+  pinned runtime's compressors are zstd and zlib (checked in its binary): do not switch to xz. WebKitGTK is never
+  bundled. `AppImageTest` checks the structure with `unsquashfs -o <runtime size>`; `SHELL_PACKAGER_TEST_APPIMAGE_RUNTIME`
+  adds a run with the real runtime. A real mount/run needs a Linux machine with FUSE.
+- **`Linux\Pkgbuild` fills a text template** (hashes computed from the built tarballs, shell-quoted values, `pkgver`
+  with `-` turned into `_`); `options=('!strip' …)` is load-bearing (stripping rewrites the pinned binaries).
+  Validate a change with `makepkg`/`namcap` in an `archlinux` container (`DisableSandbox` in pacman.conf under
+  emulation, a non-root user for makepkg).
 - **macOS (`src/Macos/`) builds one bundle per architecture** (arm64, and x86_64 for Intel Macs,
   grafida/grafida#92; `--arch`, default aarch64). `MachO` reads, in PHP, each binary's CPU, its minimum
   macOS (`LC_BUILD_VERSION`) and where its image ends; a file longer than its last segment is an SFX
@@ -52,6 +64,15 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   volume mounted at exactly `/Volumes/<volumeName>` is styled. The volume icon goes on after the
   layout (Finder deletes one that is there when it opens the window). `hdiutil attach`/`detach`
   print a deprecation warning on newer macOS; `diskutil image` does not exist on 12, so they stay.
+- **`.deb`/`.rpm` (`src/Linux/LinuxPackage.php`, grafida/grafida#87) come from a pinned nfpm** (`Linux\Nfpm`: tag 2.49.0, one
+  archive per build host, SHA-256 of the downloaded bytes, never typed from the release page; `fetch --nfpm`
+  proves it), with the tarball's file list under `/opt/<linux.name>` and `/usr/bin/<name>` an absolute symlink to
+  the launcher. nfpm's config is JSON (valid YAML) built as data, and modes are **integers** (a string mode does not
+  unmarshal into `fs.FileMode`); a `$` anywhere is refused because nfpm expands env vars in the whole file. The shell's
+  system libraries (deb `libwebkit2gtk-4.1-0` + `libgtk-3-0`, rpm `webkit2gtk4.1` + `gtk3`) are packager defaults
+  in `LinuxPackage::SHELL_DEPENDS`; `linux.package.depends` only adds. The maintainer scripts never touch a home
+  directory; post-removal deletes `/opt/<name>` on a final removal only. The tests read the packages back with
+  `ar`/`tar`/`rpm` when `SHELL_PACKAGER_TEST_NFPM` names an nfpm (CI sets it from `fetch --nfpm`).
 - **Windows (`src/Windows/`) is x86_64 only, and everything runs on any host** (the Mac builds and
   signs Windows packages; grafida/grafida#91). `PeFile` reads PE32+ and PE32 (NSIS writes x86
   installers): machine, subsystem, sections, directories, imports, the overlay and the certificate

@@ -11,6 +11,9 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager;
 
+use Grafida\ShellPackager\Linux\PackageConfig;
+use Grafida\ShellPackager\Linux\AppImageConfig;
+use Grafida\ShellPackager\Linux\PkgbuildConfig;
 use Grafida\ShellPackager\Macos\MacosConfig;
 use Grafida\ShellPackager\Windows\WindowsConfig;
 
@@ -50,7 +53,8 @@ use Grafida\ShellPackager\Windows\WindowsConfig;
  *     "icons": {"48": "assets/logo/png/grafida-48.png", "512": "…"},
  *     "files": {"LICENSE.txt": "LICENSE.txt"},
  *     "replaces": ["grafida"],   // desktop ids of an earlier build install.sh removes (see below)
- *     "output": "build/dist/Grafida-{version}-linux-{debarch}-shell-preview.tar.gz"
+ *     "output": "build/dist/Grafida-{version}-linux-{debarch}-shell-preview.tar.gz",
+ *     "package": {…}   // .deb and .rpm: maintainer, license, …; see Linux\PackageConfig
  *   },
  *   "macos": {…},   // see Macos\MacosConfig
  *   "windows": {…}  // see Windows\WindowsConfig
@@ -95,6 +99,9 @@ final readonly class Config
         public ?WindowsConfig $windows = null,
         /** @var list<string> desktop ids install.sh replaces */
         public array $linuxReplaces = [],
+        public ?PackageConfig $linuxPackage = null,
+        public ?AppImageConfig $appImage = null,
+        public ?PkgbuildConfig $pkgbuild = null,
     ) {
     }
 
@@ -197,6 +204,9 @@ final readonly class Config
             macos: isset($data['macos']) ? self::parseMacos($root, self::object($data, 'macos', $real), self::string($manifest, 'title', null, $manifestPath)) : null,
             windows: isset($data['windows']) ? self::parseWindows($root, self::object($data, 'windows', $real), self::string($manifest, 'title', null, $manifestPath)) : null,
             linuxReplaces: array_values(array_unique($replaces)),
+            linuxPackage: isset($linux['package']) ? PackageConfig::fromArray(self::object($linux, 'package', 'linux')) : null,
+            appImage: AppImageConfig::fromArray(self::optionalObject($linux, 'appimage')),
+            pkgbuild: isset($linux['pkgbuild']) ? PkgbuildConfig::fromArray(self::object($linux, 'pkgbuild', 'linux')) : null,
         );
     }
 
@@ -204,6 +214,11 @@ final readonly class Config
     {
         return $this->runtimes[$platform->value][$name]
             ?? throw new PackagerException("The packaging configuration pins no {$platform->value} '{$name}' runtime (runtimes.{$platform->value}.{$name}).");
+    }
+
+    public function linuxPackage(): PackageConfig
+    {
+        return $this->linuxPackage ?? throw new PackagerException("The packaging configuration has no 'linux.package' section (maintainer and license are required for a .deb or .rpm).");
     }
 
     public function macos(): MacosConfig

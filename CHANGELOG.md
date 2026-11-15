@@ -1,5 +1,11 @@
 shell-packager 0.5.0
 ================================================================================
++ `linux-deb` and `linux-rpm`: packages under `/opt/<name>`, built by a pinned nfpm 2.49.0 (grafida/grafida#87)
++ `linux-appimage`: a reproducible AppImage on the pinned type-2 runtime, built with `mksquashfs` (grafida/grafida#87)
++ `linux-pkgbuild`: an Arch `PKGBUILD` for the tarballs, on the system `webkit2gtk-4.1` and `gtk3` (grafida/grafida#87)
++ `linux.package`, `linux.appimage` and `linux.pkgbuild` sections; WebKitGTK 4.1 and GTK 3 are built-in dependencies
++ `runtimes.linux.appimage-runtime`: the pinned type-2 runtime (`--local appimage-runtime=PATH`)
++ `fetch --nfpm` fetches and verifies the pinned nfpm for this build host
 + `--no-sign` for `macos-app`, `macos-dmg`, `windows-tree` and `windows-installer`: a package with nothing signed
 + A runtime may be `{"latest": true}`: the newest shell, launcher or SFX release, unpinned, with a warning
 

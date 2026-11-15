@@ -11,7 +11,11 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager;
 
+use Grafida\ShellPackager\Linux\LinuxPackage;
+use Grafida\ShellPackager\Linux\AppImage;
 use Grafida\ShellPackager\Linux\LinuxTarball;
+use Grafida\ShellPackager\Linux\Nfpm;
+use Grafida\ShellPackager\Linux\Pkgbuild;
 use Grafida\ShellPackager\Macos\Codesign;
 use Grafida\ShellPackager\Macos\MacApp;
 use Grafida\ShellPackager\Macos\MacDmg;
@@ -32,13 +36,17 @@ final class Cli
 
         Usage:
           shell-packager linux-tarball --config=FILE --arch=ARCH --app-version=VERSION [options]
+          shell-packager linux-deb --config=FILE --arch=ARCH --app-version=VERSION [options]
+          shell-packager linux-rpm --config=FILE --arch=ARCH --app-version=VERSION [options]
+          shell-packager linux-appimage --config=FILE --arch=ARCH --app-version=VERSION [options]
+          shell-packager linux-pkgbuild --config=FILE --app-version=VERSION [--arch=ARCH]… [--output=FILE]
           shell-packager macos-app --config=FILE --app-version=VERSION [--arch=ARCH] [options]
           shell-packager macos-dmg --config=FILE --app-version=VERSION [--arch=ARCH] [--app=APP] [--no-style] [options]
           shell-packager windows-tree --config=FILE --app-version=VERSION [--output=DIR] [options]
           shell-packager windows-installer --config=FILE --app-version=VERSION [--output=FILE] [options]
           shell-packager windows-sign --file=FILE [--overlay]
           shell-packager phar --config=FILE --output=FILE [--no-check]
-          shell-packager fetch --config=FILE --arch=ARCH [--platform=linux|macos|windows] [--local=NAME=PATH]…
+          shell-packager fetch --config=FILE --arch=ARCH [--platform=linux|macos|windows] [--nfpm] [--local=NAME=PATH]…
           shell-packager version | help
 
         Options:
@@ -46,7 +54,8 @@ final class Cli
           --arch=ARCH          x86_64 or aarch64 (amd64/arm64 accepted); macOS defaults to aarch64,
                                Windows is x86_64 only
           --app-version=V      the app's version (macOS: one to three dot-separated integers)
-          --output=FILE        where to write (overrides linux.output, macos.app, macos.output,
+          --output=FILE        where to write (overrides linux.output, linux.package.output, linux.appimage.output,
+                               linux.pkgbuild.output, macos.app, macos.output,
                                windows.tree or windows.output)
           --app=APP            macos-dmg: image this signed bundle instead of building one
           --no-sign            macos-app, macos-dmg, windows-tree, windows-installer: sign nothing, whatever the
@@ -54,11 +63,12 @@ final class Cli
                                not seal the bundle. See the caveats in the documentation.
           --no-style           macos-dmg: no Finder layout (it needs Finder and its Automation
                                permission; a CI runner has neither)
-          --local=NAME=PATH    use a local file for runtime NAME (shell, launcher, sfx). UNPINNED:
+          --local=NAME=PATH    use a local file for runtime NAME (shell, launcher, sfx, appimage-runtime; nfpm for linux-deb/rpm). UNPINNED:
                                for testing an unreleased build only; announced on every use
           --no-check           skip running the packaged worker (it runs only on a host of the
                                target's OS and architecture anyway; a macOS x86_64 worker also
                                on an arm64 Mac with Rosetta 2)
+          --nfpm               fetch: also fetch and verify the pinned nfpm for this build host
           --file=FILE          windows-sign: the executable to sign (what !uninstfinalize runs)
           --overlay            windows-sign: the file keeps data past its image (an NSIS installer
                                or uninstaller); never for a worker stub
@@ -72,6 +82,9 @@ final class Cli
         keystore with WINDOWS_SIGN_PKCS12 and WINDOWS_SIGN_PKCS12_PASSWORD. Neither: unsigned.
         WINDOWS_SIGN_CAFILE makes the signature checks verify the chain to those roots. Needs
         jsign and osslsigncode; the installer needs makensis 3.08 or later.
+
+        linux-deb and linux-rpm write the package with a pinned nfpm (macOS or Linux build host), from the
+        same file list as the tarball, under /opt/<linux.name>; they need linux.package (maintainer, license).
 
         Timestamps come from SOURCE_DATE_EPOCH when it is set (Linux output is byte-reproducible;
         macOS output is not). Downloads are cached by SHA-256 in SHELL_PACKAGER_CACHE (default:
@@ -88,6 +101,10 @@ final class Cli
 
             return match ($command) {
                 'linux-tarball' => self::linuxTarball($options),
+                'linux-deb'     => self::linuxPackage($options, 'deb'),
+                'linux-rpm'     => self::linuxPackage($options, 'rpm'),
+                'linux-appimage' => self::linuxAppImage($options),
+                'linux-pkgbuild' => self::linuxPkgbuild($options),
                 'macos-app'     => self::macosApp($options),
                 'macos-dmg'     => self::macosDmg($options),
                 'windows-tree'  => self::windowsTree($options),
@@ -139,6 +156,120 @@ final class Cli
         }
 
         self::say("Done: {$output} (" . Filesystem::size((int) filesize($output)) . ')');
+
+        return 0;
+    }
+
+    /** @param array<string, list<string>> $options */
+    private static function linuxPackage(array $options, string $format): int
+    {
+        $config  = Config::load(self::one($options, 'config'));
+        $config->linuxPackage();
+        $arch    = Arch::parse(self::one($options, 'arch'));
+        $version = self::one($options, 'app-version');
+        LinuxPackage::packageVersion($version);
+        $mtime   = self::timestamp();
+        $output  = isset($options['output']) ? self::one($options, 'output') : LinuxPackage::outputPath($config, $format, $arch, $version);
+        $fetcher = self::fetcher($options);
+
+        $runtimes = [];
+
+        foreach (['launcher', 'shell', 'sfx'] as $name) {
+            $runtimes[$name] = $fetcher->fetch($config->runtime($name), $arch);
+            self::say("{$name}: {$runtimes[$name]}");
+        }
+
+        $work = Filesystem::tempDir('linux-' . $format);
+
+        try {
+            $nfpm = Nfpm::binary($fetcher, $work);
+            self::say("nfpm: {$nfpm}");
+            $payload = $work . '/' . $config->workerBinary . '.phar';
+            (new PharBuilder(self::log(...)))->build($config, $payload, $mtime);
+
+            if (!isset($options['no-check'])) {
+                self::check($config, $arch, $runtimes['sfx'], $payload);
+            }
+
+            LinuxPackage::write($config, $format, $runtimes, $payload, $output, $mtime, $arch, $version, $nfpm, $work);
+        } finally {
+            Filesystem::remove($work);
+        }
+
+        self::say("Done: {$output} (" . Filesystem::size((int) filesize($output)) . ')');
+
+        return 0;
+    }
+
+    /** @param array<string, list<string>> $options */
+    private static function linuxAppImage(array $options): int
+    {
+        // Before the downloads and the PHAR: a missing mksquashfs should cost nothing.
+        AppImage::requireTools();
+
+        $config  = Config::load(self::one($options, 'config'));
+        $arch    = Arch::parse(self::one($options, 'arch'));
+        $version = self::one($options, 'app-version');
+        $mtime   = self::timestamp();
+        $output  = isset($options['output']) ? self::one($options, 'output') : AppImage::outputPath($config, $arch, $version);
+        $fetcher = self::fetcher($options);
+
+        $runtimes = [];
+
+        foreach (['launcher', 'shell', 'sfx'] as $name) {
+            $runtimes[$name] = $fetcher->fetch($config->runtime($name), $arch);
+            self::say("{$name}: {$runtimes[$name]}");
+        }
+
+        $runtime = $fetcher->fetch($config->runtime('appimage-runtime'), $arch);
+        self::say("appimage-runtime: {$runtime}");
+
+        $work = Filesystem::tempDir('appimage-payload');
+
+        try {
+            $payload = $work . '/' . $config->workerBinary . '.phar';
+            (new PharBuilder(self::log(...)))->build($config, $payload, $mtime);
+
+            if (!isset($options['no-check'])) {
+                self::check($config, $arch, $runtimes['sfx'], $payload);
+            }
+
+            AppImage::write($config, $runtimes, $runtime, $payload, $output, $mtime, $arch);
+        } finally {
+            Filesystem::remove($work);
+        }
+
+        self::say("Done: {$output} (" . Filesystem::size((int) filesize($output)) . ')');
+
+        return 0;
+    }
+
+    /** @param array<string, list<string>> $options */
+    private static function linuxPkgbuild(array $options): int
+    {
+        $config  = Config::load(self::one($options, 'config'));
+        $version = self::one($options, 'app-version');
+        $archs   = isset($options['arch'])
+            ? array_map(static fn (string $a): Arch => Arch::parse($a), $options['arch'])
+            : [Arch::X86_64, Arch::Aarch64];
+        $tarballs = [];
+
+        foreach ($archs as $arch) {
+            $path = LinuxTarball::outputPath($config, $arch, $version);
+
+            // Without --arch, whichever tarballs have been built; with it, each one must exist.
+            if (isset($options['arch']) || is_file($path)) {
+                $tarballs[$arch->value] = $path;
+            }
+        }
+
+        if ($tarballs === []) {
+            throw new PackagerException('No tarball has been built for ' . $version . ': run linux-tarball first.');
+        }
+
+        $output = isset($options['output']) ? self::one($options, 'output') : Pkgbuild::outputPath($config);
+        Filesystem::write($output, Pkgbuild::render($config, $version, $tarballs));
+        self::say("Done: {$output} (" . implode(', ', array_keys($tarballs)) . ')');
 
         return 0;
     }
@@ -419,6 +550,11 @@ final class Cli
             self::say("{$runtime->name}: " . $fetcher->fetch($runtime, $arch));
         }
 
+        if (isset($options['nfpm'])) {
+            // A tool of this build host (any --arch is ignored for it), pinned in the packager.
+            self::say('nfpm: ' . $fetcher->fetch(Nfpm::runtime(\PHP_OS_FAMILY), Arch::host() ?? $arch));
+        }
+
         return 0;
     }
 
@@ -477,7 +613,7 @@ final class Cli
     private static function options(array $args): array
     {
         $options = [];
-        $flags   = ['no-check', 'no-sign', 'no-style', 'overlay'];
+        $flags   = ['no-check', 'no-sign', 'no-style', 'overlay', 'nfpm'];
 
         for ($i = 0, $n = \count($args); $i < $n; $i++) {
             if (!str_starts_with($args[$i], '--')) {
