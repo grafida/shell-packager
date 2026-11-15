@@ -70,7 +70,8 @@ final class PkgbuildTest extends TestCase
 
     public function testTheFileIsValidBash(): void
     {
-        if (!Process::exists('bash')) {
+        if (PHP_OS_FAMILY === 'Windows' || !Process::exists('bash')) {
+            // On Windows `bash` is the WSL launcher, which has no distribution on the runners.
             self::markTestSkipped('no bash');
         }
 
