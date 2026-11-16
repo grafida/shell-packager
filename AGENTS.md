@@ -30,115 +30,6 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   packaging config, so the shell and the package cannot disagree. The desktop entry is
   `<id>.desktop`, with `Icon` and `StartupWMClass` forced to the id, because the shell's GTK
   program name (its Wayland `app_id`) is the id.
-- **Vendor files come from a `composer install --no-dev --no-scripts` staging copy**
-  (`Phar\PharBuilder`), never the app's `vendor/`. A relative `path` repository has to be made
-  absolute in **both** the staged `composer.json` and the staged `composer.lock`, since the install
-  reads the lock's `dist.url`.
-- **The ini block is checked by running it** (`Phar\WorkerCheck`): phpmicro ignores a malformed
-  block silently and then writes its bytes to stdout. The handshake check (protocol v1 `ready`) is
-  the app-agnostic proof that a payload boots. Both need a host of the target's OS and architecture
-  (Linux, a Mac, or Windows x86_64; an x86_64 macOS worker also on an arm64 Mac with Rosetta 2, which
-  `WorkerCheck::decide()` asks about through an injected probe, `arch -x86_64 /usr/bin/true`);
-  elsewhere they are skipped with a note, never faked. On macOS the
-  handshake runs on the **signed stub inside the finished bundle** (`handshakeAt`), under the
-  hardened runtime with the entitlements it was given: that is the test any entitlement must fail
-  without before it is kept (grafida/grafida#88).
-- **The AppImage (`Linux\AppImage`) is `runtime ++ squashfs`, assembled in PHP with `mksquashfs`**,
-  not appimagetool (a Linux ELF; the packages are built on a Mac). The launcher is `AppRun`; the desktop entry and
-  largest icon sit at the AppDir root. Reproducibility depends on `env -u SOURCE_DATE_EPOCH mksquashfs … -mkfs-time/-all-time/-root-time
-  <mtime> -all-root -no-xattrs`: mksquashfs refuses explicit times together with that variable (`-repro-time` is 4.6+, absent from Ubuntu 22.04's 4.5). Update information is
-  written into the runtime's `.upd_info` section, located through the ELF section headers, never by offset. The
-  pinned runtime's compressors are zstd and zlib (checked in its binary): do not switch to xz. WebKitGTK is never
-  bundled. `AppImageTest` checks the structure with `unsquashfs -o <runtime size>`; `SHELL_PACKAGER_TEST_APPIMAGE_RUNTIME`
-  adds a run with the real runtime. A real mount/run needs a Linux machine with FUSE; `--appimage-extract-and-run` in an
-  `ubuntu:22.04` container (arm64 natively on the Mac) runs the real runtime and the launcher without one.
-- **`Linux\Squashfs` (grafida/shell-packager#1): `mksquashfs` on the host, or in Docker** (`linux.appimage.squashfs`
-  `auto`/`host`/`docker`). The AppDir is described as `AppDirEntry`s and fed to mksquashfs **4.6+ as a plain tar on
-  stdin** (`-tar`), from `TarWriter` with fixed modes: a staged directory leaked the host (a symlink is 0755 on macOS,
-  0777 on Linux; NTFS has no modes). Only a host mksquashfs < 4.6 still gets a directory. Docker: no bind mount
-  (the tar goes in on stdin, the image out on stdout), `--network none`, and the image is built locally from
-  `resources/docker/squashfs.Dockerfile` (alpine by index digest, `squashfs-tools` and `zstd-libs` at exact versions,
-  tagged by the file's hash) or is `linux.appimage.docker.image`, which must be `@sha256:`. Keep the Dockerfile's
-  versions equal to Homebrew's: then host and Docker give the same bytes (`SHELL_PACKAGER_TEST_DOCKER=1` checks it).
-  `auto` treats a `docker` whose daemon does not answer as absent, with its own message.
-- **`Linux\Pkgbuild` fills a text template** (hashes computed from the built tarballs, shell-quoted values, `pkgver`
-  with `-` turned into `_`); `options=('!strip' …)` is load-bearing (stripping rewrites the pinned binaries).
-  Validate a change with `makepkg`/`namcap` in an `archlinux` container (`DisableSandbox` in pacman.conf under
-  emulation, a non-root user for makepkg).
-- **macOS (`src/Macos/`) builds one bundle per architecture** (arm64, and x86_64 for Intel Macs,
-  grafida/grafida#92; `--arch`, default aarch64). `MachO` reads, in PHP, each binary's CPU, its minimum
-  macOS (`LC_BUILD_VERSION`) and where its image ends; a file longer than its last segment is an SFX
-  with its payload still appended, which is refused (signing it corrupts the PHAR). Both real pins
-  end exactly at their last segment; `MachOTest` checks that on CI. `LSMinimumSystemVersion` is
-  `InfoPlist::MINIMUM_SYSTEM_VERSION` (12.0, the shell's floor) and every binary's minos must be
-  within it. `Info.plist` keys the packager computes are an error in `macos.infoPlist`.
-- **Signing identity and notary profile come from the environment** (`MACOS_SIGN_IDENTITY`,
-  `MACOS_NOTARY_PROFILE`), never an app's repository. Without the identity everything is signed ad
-  hoc, but **always with the hardened runtime**, so a local build behaves like the notarised one.
-  Inside-out: the stub, the shell, then the bundle, whose signature re-signs the main executable and
-  must therefore carry the shell's entitlements too. Each signature is verified and read back
-  (`codesign -d --entitlements - --xml`): exactly the configured entitlements, hardened runtime set.
-- **The DMG's Finder layout is best-effort and must never hang or touch another volume**:
-  `osascript` runs under a time limit (an unanswered Automation prompt blocks forever), and only a
-  volume mounted at exactly `/Volumes/<volumeName>` is styled. The volume icon goes on after the
-  layout (Finder deletes one that is there when it opens the window). `hdiutil attach`/`detach`
-  print a deprecation warning on newer macOS; `diskutil image` does not exist on 12, so they stay.
-- **`.deb`/`.rpm` (`src/Linux/LinuxPackage.php`, grafida/grafida#87) come from a pinned nfpm** (`Linux\Nfpm`: tag 2.49.0, one
-  archive per build host, SHA-256 of the downloaded bytes, never typed from the release page; `fetch --nfpm`
-  proves it), with the tarball's file list under `/opt/<linux.name>` and `/usr/bin/<name>` an absolute symlink to
-  the launcher. nfpm's config is JSON (valid YAML) built as data, and modes are **integers** (a string mode does not
-  unmarshal into `fs.FileMode`); a `$` anywhere is refused because nfpm expands env vars in the whole file. The shell's
-  system libraries (deb `libwebkit2gtk-4.1-0` + `libgtk-3-0`, rpm `webkit2gtk4.1` + `gtk3`) are packager defaults
-  in `LinuxPackage::SHELL_DEPENDS`; `linux.package.depends` only adds. The maintainer scripts never touch a home
-  directory; post-removal deletes `/opt/<name>` on a final removal only. The tests read the packages back with
-  `ar`/`tar`/`rpm` when `SHELL_PACKAGER_TEST_NFPM` names an nfpm (CI sets it from `fetch --nfpm`).
-- **Windows (`src/Windows/`) is x86_64 only, and everything runs on any host** (the Mac builds and
-  signs Windows packages; grafida/grafida#91). `PeFile` reads PE32+ and PE32 (NSIS writes x86
-  installers): machine, subsystem, sections, directories, imports, the overlay and the certificate
-  table. `ResourceWriter` rebuilds `.rsrc` **in place** and moves `.reloc` (nothing refers to it but
-  its directory) behind it; any other layout is refused, not patched. The manifest resource is kept;
-  icons and the version are replaced. A file with an overlay (an SFX with its PHAR appended) is never
-  given resources or signed. `VersionInfo::decode()` exists so the tests read back what Windows
-  reads; it was checked against PHP's own `rc.exe`-built block.
-- **Windows signing is Jsign, from the environment** (`WINDOWS_SIGN_*`: Trusted Signing, or a PKCS#12
-  keystore for tests), secrets as `env:` references, each signature checked with `osslsigncode`
-  (digest always, chain with `WINDOWS_SIGN_CAFILE`). The uninstaller is signed by the app's `.nsi`
-  through `!uninstfinalize '${SHELL_PACKAGER_SIGN}'`, which runs `windows-sign`; it records what it
-  signed in `SHELL_PACKAGER_SIGN_LOG`, and an empty record fails the build.
-- **On a Windows host** (the worker check, CI): `proc_open()` pipes are not selectable, so the
-  handshake polls a stdout file; `composer` runs through a command string (CreateProcess runs no
-  `.bat` without its extension, and a batch file found on PATH under a quoted name gets the wrong
-  `%~dp0`); a path package is installed as a **copy** (the lock's `transport-options`, which an
-  install from a lock reads; composer's junction is a leaf to `RecursiveDirectoryIterator`, so the
-  package went missing from the PHAR). The Linux fixture tarball was byte-identical before and after.
-- **`runtimes` is grouped by platform** (`linux`, `macos`, `windows`); a flat one is Linux's, and a
-  mix is an error. A runtime's `url` is one template (`{arch}`) or an object of one URL per architecture, for pins of
-  one platform verified on different releases (the macOS SFX). `shell` and `launcher` are no longer runtimes: an entry
-  there is refused, with how to move to the `shell` block.
-- **`linux.replaces`** (grafida/grafida#92) lets `install.sh` remove an earlier build's desktop
-  entry and hicolor icons under another id, only when its main `Exec` (field codes dropped, quotes
-  removed; an older installer wrote an unquoted path with spaces) ends in `/<linux.name>`. The ids are
-  validated as desktop ids so the script can glob them; the app's own id is refused.
-- **Determinism:** sorted PHAR entries, `seld/phar-utils` timestamps, `SOURCE_DATE_EPOCH`, and our
-  own `Archive\TarWriter` (ustar, uid/gid 0, fixed mtime, streamed gzip). PharData cannot set modes
-  and times, and BSD tar on macOS has no `--sort`/`--mtime`, while Linux packages are also built on
-  macOS.
-- **The fixture app (`tests/fixtures/app`) carries a minimal, independent protocol v1 worker** (its
-  `bin/worker.php`). Its `shell-package.json` pins the **real** shell by version (`shell.version` plus the committed
-  `shell-package.lock`; `shell-packager update` after a bump) and the real SFX releases by URL and hash.
-  `scripts/e2e-linux.sh` packages it, installs it and runs it headless;
-  `scripts/e2e-macos.sh` builds its DMG, mounts it, copies the app out and launches it **through
-  LaunchServices** (`open`), which is the only thing that reads `Info.plist` (`--no-style` on a runner without
-  Finder automation; `ARCH=x86_64` for the Intel bundle). `scripts/e2e-windows.sh` builds its installer (or takes one, `INSTALLER=`, as the
-  test guests do), installs it silently, reads back the resources and signatures as Windows does,
-  launches it and uninstalls it. ⚠️ In Git Bash an NSIS switch
-  is `//S` (MSYS rewrites `/S` to `S:/`), and `/D=` takes a path with no space in it. Bump those pins
-  when a new shell or SFX should be covered. ⚠️ **CI runs none of these end-to-end scripts** (nor installs any package): they are run by hand on the maintainer's machines and VMs, which is cheaper and closer to real systems; CI keeps the lint and the unit suite. The macOS tests need `SHELL_PACKAGER_TEST_MACOS_SHELL`
-  and `_SFX`, the Windows ones `SHELL_PACKAGER_TEST_WINDOWS_SHELL` and `_SFX` (CI fetches the pins
-  with `fetch --platform=…`).
-- **Every Linux change is checked byte for byte**: with a fixed `SOURCE_DATE_EPOCH`, the fixture's
-  tarball before and after must have the same SHA-256 (done for the 0.2.0 refactor, on the 0.1.0
-  pins, before they were bumped).
 - Every PHP file uses the MIT docblock; PHPStan level max + strict rules (`composer linter:check`)
   and the suite (`composer test`) must pass, as must `shellcheck` on `scripts/` and `resources/`.
 
@@ -148,3 +39,16 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   Every PHP file starts with the MIT docblock used in `bin/shell-packager`.
 - Keep a terse `CHANGELOG.md` entry per change (Grafida's `!` `+` `-` `~` `# [HIGH|MEDIUM|LOW]` style).
 - Commit directly on `main`.
+
+## Project memory
+
+Project memory lives in `.claude/memory/`. Read the matching file before starting that kind of work.
+
+| File | Read it when… |
+|------|---------------|
+| [`phar-and-worker-check.md`](.claude/memory/phar-and-worker-check.md) | Before you touch `Phar\PharBuilder`, `Phar\WorkerCheck`, or run the worker on a Windows host |
+| [`linux-packaging.md`](.claude/memory/linux-packaging.md) | Before you touch `src/Linux/` (AppImage, squashfs, PKGBUILD, nfpm `.deb`/`.rpm`, `linux.replaces`) |
+| [`macos-packaging.md`](.claude/memory/macos-packaging.md) | Before you touch `src/Macos/`: Mach-O checks, signing / notarisation, the DMG |
+| [`windows-packaging.md`](.claude/memory/windows-packaging.md) | Before you touch `src/Windows/`: PE resources, Jsign signing, the NSIS installer |
+| [`runtimes-config.md`](.claude/memory/runtimes-config.md) | Before you change how `runtimes`, `shell` or `launcher` config entries are parsed |
+| [`determinism-and-e2e-tests.md`](.claude/memory/determinism-and-e2e-tests.md) | Before you change archive creation, the fixture app, or the `scripts/e2e-*.sh` scripts |
