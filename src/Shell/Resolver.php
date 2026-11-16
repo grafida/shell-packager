@@ -75,7 +75,7 @@ final class Resolver
                 continue;
             }
 
-            $version = (string) preg_replace('/^[vV]/', '', $release->tag);
+            $version = self::versionOf($release->tag);
 
             try {
                 $parser->normalize($version);
@@ -120,6 +120,12 @@ final class Resolver
         }
 
         return new ShellLock($shell->contentHash(), $shell->repository, $shell->constraint, $version, $release->tag, $files);
+    }
+
+    /** The version a release tag stands for: the tag without a leading `v`. */
+    public static function versionOf(string $tag): string
+    {
+        return (string) preg_replace('/^[vV]/', '', $tag);
     }
 
     /** @return 'stable'|'RC'|'beta'|'alpha'|'dev' */

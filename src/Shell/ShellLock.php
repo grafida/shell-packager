@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager\Shell;
 
+use Composer\Semver\Semver;
 use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
@@ -197,8 +198,9 @@ final readonly class ShellLock
     }
 
     /**
-     * Refuses a lock that does not say what the configuration would have resolved to: another
-     * repository, other asset names, or a URL that is not that asset of that release on GitHub.
+     * Refuses a lock that does not say what the configuration could have resolved to: another
+     * repository, a version the constraint does not allow, a tag that is not that version's, other
+     * asset names, or a URL that is not that asset of that release on GitHub.
      * The content hash ties a lock to the configuration but not to its files; this ties the files
      * to the repository, so a lock edited by hand cannot send a build elsewhere with a hash to match.
      */
@@ -210,6 +212,14 @@ final readonly class ShellLock
 
         if ($this->repository !== $shell->repository) {
             throw $fail("its repository is {$this->repository}, shell.repository is {$shell->repository}");
+        }
+
+        if ($this->constraint !== $shell->constraint || !Semver::satisfies($this->version, $shell->constraint)) {
+            throw $fail("its version {$this->version} is not one shell.version '{$shell->constraint}' allows");
+        }
+
+        if (Resolver::versionOf($this->tag) !== $this->version) {
+            throw $fail("its tag {$this->tag} is not the tag of version {$this->version}");
         }
 
         foreach ($this->files as $platform => $components) {

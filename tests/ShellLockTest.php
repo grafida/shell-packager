@@ -85,7 +85,7 @@ final class ShellLockTest extends TestCase
     }
 
     /** A lock as GitHub would have it: browser_download_url of the configured repository. */
-    private static function githubLock(): ShellLock
+    private static function githubLock(string $version = '0.4.2', string $tag = '0.4.2'): ShellLock
     {
         $lock  = self::lock();
         $files = [];
@@ -93,12 +93,12 @@ final class ShellLockTest extends TestCase
         foreach ($lock->files as $platform => $components) {
             foreach ($components as $component => $byArch) {
                 foreach ($byArch as $arch => $file) {
-                    $files[$platform][$component][$arch] = new LockedFile($file->name, "https://github.com/grafida/shell/releases/download/0.4.2/{$file->name}", $file->sha256);
+                    $files[$platform][$component][$arch] = new LockedFile($file->name, "https://github.com/grafida/shell/releases/download/{$tag}/{$file->name}", $file->sha256);
                 }
             }
         }
 
-        return new ShellLock($lock->contentHash, $lock->repository, $lock->constraint, $lock->version, $lock->tag, $files);
+        return new ShellLock($lock->contentHash, $lock->repository, $lock->constraint, $version, $tag, $files);
     }
 
     public function testALockMustAgreeWithTheConfigurationItClaims(): void
@@ -113,6 +113,11 @@ final class ShellLockTest extends TestCase
             'another host'       => static fn (string $j): string => preg_replace('#"url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-macos-arm64"#', '"url": "https://evil.example/grafida-shell-macos-arm64"', $j, 1) ?? '',
             'another release'    => static fn (string $j): string => preg_replace('#/download/0.4.2/grafida-shell-windows#', '/download/0.1.0/grafida-shell-windows', $j, 1) ?? '',
         ];
+
+        // A release the constraint does not allow, or a tag that is not the version's, with URLs to match.
+        $tampered['a version outside the constraint'] = static fn (string $j): string => self::githubLock('0.3.0', '0.3.0')->toJson();
+        $tampered['a tag that is not the version']    = static fn (string $j): string => self::githubLock('0.4.2', '0.4.1')->toJson();
+        self::githubLock('0.4.1', 'v0.4.1')->verify($shell, 'x.lock');
 
         foreach ($tampered as $what => $edit) {
             $json = $edit(self::githubLock()->toJson());
