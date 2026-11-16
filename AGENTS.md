@@ -13,9 +13,18 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   separate `<name>.phar` (on macOS, `../Resources/<basename>.phar`). Signing a stub with the PHAR
   *appended* puts the signature past the PHAR, corrupts it, and the app dies at startup. Never
   re-combine them.
-- Every downloaded binary is pinned and verified by SHA-256 before use. The one exception is a runtime the app
-  explicitly sets to `{"latest": true}`: it is downloaded unpinned and announced as LATEST (with its URL and hash) on
-  every use. There is no silent "no hash" path.
+- Every downloaded binary is verified by SHA-256 before use. There is no silent "no hash" path.
+  - **The shell and launcher are pinned by version** (`src/Shell/`): `"shell": {"version": "<Composer constraint>"}`
+    is resolved against `shell.repository`'s GitHub releases (default `grafida/shell`; public repositories only) into
+    a committed `shell-package.lock`. The lock holds the seven files' URLs and SHA-256s, taken from GitHub's asset
+    `digest`, never typed by hand. A build reads it and makes no API call. A stale lock (its `content-hash` is not
+    the config's) fails the build. A lock whose repository, names or URLs are not that release's assets on GitHub is
+    refused (`ShellLock::verify`), since the content hash does not cover the files. A missing lock is written first.
+    `composer/semver` does not filter by stability (`^0.4` matches `0.4.3-beta1`), so `Resolver` applies Composer's
+    minimum-stability rule itself. `shell.local` / `--local` files are announced UNPINNED on every use.
+  - Every other runtime (SFX, AppImage runtime, nfpm) is pinned by `url` + `sha256`. The exception is a runtime the
+    app sets to `{"latest": true}`: it is downloaded unpinned and announced as LATEST (with its URL and hash) on every
+    use.
 
 - **Every name comes from the app's manifest** (`id`, `title`, `worker.binary`), never from the
   packaging config, so the shell and the package cannot disagree. The desktop entry is
@@ -103,9 +112,9 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   install from a lock reads; composer's junction is a leaf to `RecursiveDirectoryIterator`, so the
   package went missing from the PHAR). The Linux fixture tarball was byte-identical before and after.
 - **`runtimes` is grouped by platform** (`linux`, `macos`, `windows`); a flat one is Linux's, and a
-  mix is an error. Grafida's configuration used the flat shape. A runtime's `url` is one template
-  (`{arch}`) or an object of one URL per architecture, for pins of one platform verified on
-  different releases (Grafida's macOS arm64 and x86_64).
+  mix is an error. A runtime's `url` is one template (`{arch}`) or an object of one URL per architecture, for pins of
+  one platform verified on different releases (the macOS SFX). `shell` and `launcher` are no longer runtimes: an entry
+  there is refused, with how to move to the `shell` block.
 - **`linux.replaces`** (grafida/grafida#92) lets `install.sh` remove an earlier build's desktop
   entry and hicolor icons under another id, only when its main `Exec` (field codes dropped, quotes
   removed; an older installer wrote an unquoted path with spaces) ends in `/<linux.name>`. The ids are
@@ -115,7 +124,8 @@ producing signed per-platform artefacts. It is extracted from Grafida's `scripts
   and times, and BSD tar on macOS has no `--sort`/`--mtime`, while Linux packages are also built on
   macOS.
 - **The fixture app (`tests/fixtures/app`) carries a minimal, independent protocol v1 worker** (its
-  `bin/worker.php`), and its `shell-package.json` pins the **real** shell and SFX releases.
+  `bin/worker.php`). Its `shell-package.json` pins the **real** shell by version (`shell.version` plus the committed
+  `shell-package.lock`; `shell-packager update` after a bump) and the real SFX releases by URL and hash.
   `scripts/e2e-linux.sh` packages it, installs it and runs it headless;
   `scripts/e2e-macos.sh` builds its DMG, mounts it, copies the app out and launches it **through
   LaunchServices** (`open`), which is the only thing that reads `Info.plist` (`--no-style` on a runner without

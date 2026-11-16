@@ -33,6 +33,7 @@ For this package:
   - `SHELL_PACKAGER_TEST_APPIMAGE_RUNTIME`: the pinned type-2 runtime (`fetch --platform=linux`).
   - `SHELL_PACKAGER_TEST_DOCKER`: build an AppImage's squashfs in the packager's Docker image, and compare it with
     the host's `mksquashfs`.
+  - `SHELL_PACKAGER_TEST_GITHUB=1`: list the real `grafida/shell` releases, through `gh` and through the GitHub API.
   - `SHELL_PACKAGER_TEST_NFPM`: an nfpm binary, to build and read back `.deb` and `.rpm` packages (`fetch --nfpm`).
   - `SHELL_PACKAGER_TEST_SFX` (Linux), `SHELL_PACKAGER_TEST_MACOS_SHELL`, `_SFX` (with `_ARCH`, default aarch64) and
     `SHELL_PACKAGER_TEST_WINDOWS_SHELL`, `_SFX`: the pinned shells and SFX stubs (`fetch --platform=…`), for the

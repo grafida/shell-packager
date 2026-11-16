@@ -1,9 +1,14 @@
 shell-packager 0.6.0
 ================================================================================
+! The shell and launcher are pinned by version (`shell.version`, Composer syntax) in a committed `shell-package.lock`
++ `shell-packager update` resolves `shell.version` against the GitHub releases and rewrites the lock
++ `shell.local` lets local files stand in for any shell or launcher file, announced as UNPINNED
++ `shell.repository` and `shell.assets` for a fork of the shell that publishes elsewhere or under other names
 + `linux-appimage` without a host `mksquashfs`: it runs in a Docker image built from a pinned Dockerfile (#1)
 + `linux.appimage.squashfs` (`auto`, `host` or `docker`) and `linux.appimage.docker.image`, pinned by digest
 + `runtimes.linux.appimage-runtime` may be `{"latest": true}`: type2-runtime's newest (`continuous`) build, with a warning
 ~ The README links to the user documentation in grafida/shell instead of repeating it
+~ `runtimes.*.shell` and `runtimes.*.launcher` pins are refused, with how to move to the `shell` block
 # [LOW] An AppImage built on a Mac was not byte-identical to one built on Linux (the mode of `.DirIcon`)
 # [LOW] `shell-packager version` said 0.4.0 in 0.5.0 and 0.5.1
 
