@@ -67,17 +67,17 @@
     "runtimes": {
         "linux": {
             "shell": {
-                "url": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-linux-{arch}",
+                "url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-linux-{arch}",
                 "sha256": {
-                    "x86_64": "e215ac9f47d343c87083c5f981f6a1a1aa1a9b6b6f2edd18892d23675150a7c1",
-                    "aarch64": "e991f9fb7236b708130c8abb95324c162221684c8d98298928eb88c515b6ec3c"
+                    "x86_64": "432b734f15febd3964064f585e2e2998706d24843c1febbc9f11d3be23da9340",
+                    "aarch64": "6ff270aa129e1ee69e920cdd03d1929d15bf9f97012f5973c3fb1a06fd6f2fb9"
                 }
             },
             "launcher": {
-                "url": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-launcher-linux-{arch}",
+                "url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-launcher-linux-{arch}",
                 "sha256": {
-                    "x86_64": "f0a4a785d002d9b323723ba7c75dc600ad67fe3b70c4d3e21bbb9f52b6cceaa6",
-                    "aarch64": "d0f298e5ad20ff50aa0a364c31cc9db3219dc1c4f486915344d18ce4c3be58ad"
+                    "x86_64": "4ad3aa974895c2b9ca3559d47094f87ca616ea458fd7988ec59e57f58df5338e",
+                    "aarch64": "0caa881bff8076e27772b060311099c7d431bd310ca8840108647c257f64983d"
                 }
             },
             "sfx": {
