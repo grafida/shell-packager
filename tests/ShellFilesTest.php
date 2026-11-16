@@ -180,7 +180,8 @@ final class ShellFilesTest extends TestCase
         foreach (['shell', 'launcher'] as $component) {
             foreach (Arch::cases() as $arch) {
                 self::assertSame(
-                    $this->dir . "/app/local/grafida-{$component}-linux-{$arch->value}",
+                    // From the configuration's root, as the packager joins it (with \ on Windows, from realpath()).
+                    $config->root . "/local/grafida-{$component}-linux-{$arch->value}",
                     $files->path(Platform::Linux, $component, $arch)
                 );
             }
