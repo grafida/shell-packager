@@ -24,6 +24,11 @@ use Grafida\ShellPackager\Macos\MacDmg;
 use Grafida\ShellPackager\Macos\MachO;
 use Grafida\ShellPackager\Phar\PharBuilder;
 use Grafida\ShellPackager\Phar\WorkerCheck;
+use Grafida\ShellPackager\Shell\ReleaseSource;
+use Grafida\ShellPackager\Shell\ReleaseSources;
+use Grafida\ShellPackager\Shell\ShellAssets;
+use Grafida\ShellPackager\Shell\ShellFiles;
+use Grafida\ShellPackager\Shell\ShellLock;
 use Grafida\ShellPackager\Windows\Authenticode;
 use Grafida\ShellPackager\Windows\WindowsInstaller;
 use Grafida\ShellPackager\Windows\WindowsTree;
@@ -50,6 +55,7 @@ final class Cli
           shell-packager windows-sign --file=FILE [--overlay]
           shell-packager phar --config=FILE --output=FILE [--no-check]
           shell-packager fetch --config=FILE --arch=ARCH [--platform=linux|macos|windows] [--nfpm] [--local=NAME=PATH]…
+          shell-packager update --config=FILE
           shell-packager version | help
 
         Options:
@@ -67,7 +73,7 @@ final class Cli
           --no-style           macos-dmg: no Finder layout (it needs Finder and its Automation
                                permission; a CI runner has neither)
           --local=NAME=PATH    use a local file for runtime NAME (shell, launcher, sfx, appimage-runtime; nfpm for linux-deb/rpm). UNPINNED:
-                               for testing an unreleased build only; announced on every use
+                               for testing an unreleased build only; announced on every use. Wins over shell.local
           --no-check           skip running the packaged worker (it runs only on a host of the
                                target's OS and architecture anyway; a macOS x86_64 worker also
                                on an arm64 Mac with Rosetta 2)
@@ -92,9 +98,17 @@ final class Cli
         linux-appimage needs mksquashfs: the host's (squashfs-tools), or one in a Docker container the
         packager builds once from its own pinned Dockerfile (linux.appimage.squashfs: auto, host, docker).
 
+        The shell and launcher are pinned by shell.version (a Composer version constraint) against the
+        releases of shell.repository (default grafida/shell; public repositories only). update resolves it,
+        downloads and checks every shell file, and writes the lock beside the configuration
+        (shell-package.lock): commit it. A build reads the lock and makes no GitHub API call; with no lock
+        it writes one first, and a lock that no longer matches shell.version fails the build. Releases are
+        listed through a logged-in gh when there is one, otherwise the GitHub API (GH_TOKEN or GITHUB_TOKEN
+        if set). shell.local names local files that stand in for any shell file, announced as UNPINNED.
+
         Timestamps come from SOURCE_DATE_EPOCH when it is set (Linux output is byte-reproducible;
-        macOS output is not). Downloads are cached by SHA-256 in SHELL_PACKAGER_CACHE (default:
-        $XDG_CACHE_HOME/grafida-shell-packager).
+        macOS output is not). Downloads are cached in SHELL_PACKAGER_CACHE (default:
+        $XDG_CACHE_HOME/grafida-shell-packager): pinned runtimes by SHA-256, the shell by repository and version.
         TXT;
 
     /** @param list<string> $argv */
@@ -118,6 +132,7 @@ final class Cli
                 'windows-sign'  => self::windowsSign($options),
                 'phar'          => self::phar($options),
                 'fetch'         => self::fetch($options),
+                'update'        => self::update($options),
                 'version', '--version' => self::say('shell-packager ' . self::VERSION),
                 'help', '--help', '-h' => self::say(self::USAGE),
                 default         => throw new PackagerException("Unknown command '{$command}'.\n\n" . self::USAGE),
@@ -139,12 +154,7 @@ final class Cli
         $output  = isset($options['output']) ? self::one($options, 'output') : LinuxTarball::outputPath($config, $arch, $version);
         $fetcher = self::fetcher($options);
 
-        $runtimes = [];
-
-        foreach (['launcher', 'shell', 'sfx'] as $name) {
-            $runtimes[$name] = $fetcher->fetch($config->runtime($name), $arch);
-            self::say("{$name}: {$runtimes[$name]}");
-        }
+        $runtimes = self::linuxRuntimes($config, $fetcher, $arch);
 
         $work = Filesystem::tempDir('linux');
 
@@ -178,12 +188,7 @@ final class Cli
         $output  = isset($options['output']) ? self::one($options, 'output') : LinuxPackage::outputPath($config, $format, $arch, $version);
         $fetcher = self::fetcher($options);
 
-        $runtimes = [];
-
-        foreach (['launcher', 'shell', 'sfx'] as $name) {
-            $runtimes[$name] = $fetcher->fetch($config->runtime($name), $arch);
-            self::say("{$name}: {$runtimes[$name]}");
-        }
+        $runtimes = self::linuxRuntimes($config, $fetcher, $arch);
 
         $work = Filesystem::tempDir('linux-' . $format);
 
@@ -219,12 +224,7 @@ final class Cli
         $output  = isset($options['output']) ? self::one($options, 'output') : AppImage::outputPath($config, $arch, $version);
         $fetcher = self::fetcher($options);
 
-        $runtimes = [];
-
-        foreach (['launcher', 'shell', 'sfx'] as $name) {
-            $runtimes[$name] = $fetcher->fetch($config->runtime($name), $arch);
-            self::say("{$name}: {$runtimes[$name]}");
-        }
+        $runtimes = self::linuxRuntimes($config, $fetcher, $arch);
 
         $runtime = $fetcher->fetch($config->runtime('appimage-runtime'), $arch);
         self::say("appimage-runtime: {$runtime}");
@@ -377,12 +377,7 @@ final class Cli
         $config->macos();
         $codesign = self::codesign($options);
         $fetcher  = self::fetcher($options);
-        $runtimes = [];
-
-        foreach (['shell', 'sfx'] as $name) {
-            $runtimes[$name] = $fetcher->fetch($config->runtime($name, Platform::Macos), $arch);
-            self::say("{$name}: {$runtimes[$name]}");
-        }
+        $runtimes = self::shellAndSfx($config, $fetcher, Platform::Macos, $arch);
 
         $work = Filesystem::tempDir('macos');
 
@@ -490,12 +485,7 @@ final class Cli
 
         $config->windows();
         $fetcher  = self::fetcher($options);
-        $runtimes = [];
-
-        foreach (['shell', 'sfx'] as $name) {
-            $runtimes[$name] = $fetcher->fetch($config->runtime($name, Platform::Windows), $arch);
-            self::say("{$name}: {$runtimes[$name]}");
-        }
+        $runtimes = self::shellAndSfx($config, $fetcher, Platform::Windows, $arch);
 
         $work = Filesystem::tempDir('windows');
 
@@ -551,6 +541,14 @@ final class Cli
             : Platform::Linux;
         $fetcher  = self::fetcher($options);
 
+        if ($config->shell !== null) {
+            $shell = self::shellFiles($config, $fetcher);
+
+            foreach (array_keys(ShellAssets::SLOTS[$platform->value]) as $component) {
+                self::say("{$component}: " . $shell->path($platform, $component, $arch));
+            }
+        }
+
         foreach ($config->runtimes[$platform->value] ?? [] as $runtime) {
             self::say("{$runtime->name}: " . $fetcher->fetch($runtime, $arch));
         }
@@ -574,6 +572,60 @@ final class Cli
         WorkerCheck::iniProbe($sfx, $config->ini);
         $header = WorkerCheck::handshake($sfx, $payload, $config->workerBinary);
         self::say('Worker check: the ini block applies, and the packaged worker answered ' . $header);
+    }
+
+    /** @param array<string, list<string>> $options */
+    private static function update(array $options): int
+    {
+        $config = Config::load(self::one($options, 'config'));
+        self::shellFiles($config, self::fetcher($options))->update();
+        self::say('Wrote ' . ShellLock::pathFor($config->path) . '.');
+
+        return 0;
+    }
+
+    private static function shellFiles(Config $config, Fetcher $fetcher): ShellFiles
+    {
+        return new ShellFiles($config, $fetcher, static fn (): ReleaseSource => ReleaseSources::detect(), static function (string $line): void {
+            self::say($line);
+        });
+    }
+
+    /**
+     * The files of a Linux package: the shell and launcher from the shell block, the SFX from runtimes.
+     *
+     * @return array{launcher: string, shell: string, sfx: string}
+     */
+    private static function linuxRuntimes(Config $config, Fetcher $fetcher, Arch $arch): array
+    {
+        $shell = self::shellFiles($config, $fetcher);
+
+        return [
+            'launcher' => self::said('launcher', $shell->path(Platform::Linux, 'launcher', $arch)),
+            'shell'    => self::said('shell', $shell->path(Platform::Linux, 'shell', $arch)),
+            'sfx'      => self::said('sfx', $fetcher->fetch($config->runtime('sfx'), $arch)),
+        ];
+    }
+
+    /**
+     * The files of a macOS or Windows package: the shell from the shell block, the SFX from runtimes.
+     *
+     * @return array{shell: string, sfx: string}
+     */
+    private static function shellAndSfx(Config $config, Fetcher $fetcher, Platform $platform, Arch $arch): array
+    {
+        return [
+            'shell' => self::said('shell', self::shellFiles($config, $fetcher)->path($platform, 'shell', $arch)),
+            'sfx'   => self::said('sfx', $fetcher->fetch($config->runtime('sfx', $platform), $arch)),
+        ];
+    }
+
+    /** Prints "name: path" and returns the path. */
+    private static function said(string $name, string $path): string
+    {
+        self::say("{$name}: {$path}");
+
+        return $path;
     }
 
     /** @param array<string, list<string>> $options */

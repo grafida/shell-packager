@@ -64,22 +64,11 @@
             ]
         }
     },
+    "shell": {
+        "version": "0.4.2"
+    },
     "runtimes": {
         "linux": {
-            "shell": {
-                "url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-linux-{arch}",
-                "sha256": {
-                    "x86_64": "432b734f15febd3964064f585e2e2998706d24843c1febbc9f11d3be23da9340",
-                    "aarch64": "6ff270aa129e1ee69e920cdd03d1929d15bf9f97012f5973c3fb1a06fd6f2fb9"
-                }
-            },
-            "launcher": {
-                "url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-launcher-linux-{arch}",
-                "sha256": {
-                    "x86_64": "4ad3aa974895c2b9ca3559d47094f87ca616ea458fd7988ec59e57f58df5338e",
-                    "aarch64": "0caa881bff8076e27772b060311099c7d431bd310ca8840108647c257f64983d"
-                }
-            },
             "sfx": {
                 "url": "https://github.com/grafida/phpmicro/releases/download/sfx-20261109.16/linux-{arch}.standard.sfx",
                 "sha256": {
@@ -96,16 +85,6 @@
             }
         },
         "macos": {
-            "shell": {
-                "url": {
-                    "aarch64": "https://github.com/grafida/shell/releases/download/0.2.0/grafida-shell-macos-arm64",
-                    "x86_64": "https://github.com/grafida/shell/releases/download/0.4.0/grafida-shell-macos-x86_64"
-                },
-                "sha256": {
-                    "aarch64": "b24598ae8062614e19e9dac1c2851b90e739ee006323edd0ef810b54dab1045f",
-                    "x86_64": "8562cda8b87b2b22ddeca5f2842db715e4236e84546a1f9e299a5ed2ebe2903d"
-                }
-            },
             "sfx": {
                 "url": {
                     "aarch64": "https://github.com/grafida/phpmicro/releases/download/sfx-20261109.15/macos-aarch64.standard.sfx",
@@ -118,12 +97,6 @@
             }
         },
         "windows": {
-            "shell": {
-                "url": "https://github.com/grafida/shell/releases/download/0.3.0/grafida-shell-windows-x86_64.exe",
-                "sha256": {
-                    "x86_64": "f1974a330ca993c6d28e6c65734b06c9bdd83d08e5ee3672bf130ea24939ac54"
-                }
-            },
             "sfx": {
                 "url": "https://github.com/grafida/phpmicro/releases/download/sfx-20261110.27/windows-x86_64.standard.sfx",
                 "sha256": {

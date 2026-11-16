@@ -196,6 +196,41 @@ final readonly class ShellLock
         }
     }
 
+    /**
+     * Refuses a lock that does not say what the configuration would have resolved to: another
+     * repository, other asset names, or a URL that is not that asset of that release on GitHub.
+     * The content hash ties a lock to the configuration but not to its files; this ties the files
+     * to the repository, so a lock edited by hand cannot send a build elsewhere with a hash to match.
+     */
+    public function verify(ShellConfig $shell, string $path): void
+    {
+        $fail = static fn (string $why): PackagerException => new PackagerException(
+            "{$path} does not match the configuration ({$why}). Run shell-packager update to write it again."
+        );
+
+        if ($this->repository !== $shell->repository) {
+            throw $fail("its repository is {$this->repository}, shell.repository is {$shell->repository}");
+        }
+
+        foreach ($this->files as $platform => $components) {
+            foreach ($components as $component => $byArch) {
+                foreach ($byArch as $arch => $file) {
+                    $name = $shell->assets[$platform][$component][$arch] ?? null;
+
+                    if ($file->name !== $name) {
+                        throw $fail("the {$platform} {$component} for {$arch} is {$file->name}, the configuration names " . json_encode($name));
+                    }
+
+                    $url = 'https://github.com/' . $this->repository . '/releases/download/' . rawurlencode($this->tag) . '/' . rawurlencode($file->name);
+
+                    if ($file->url !== $url) {
+                        throw $fail("{$file->name} is to be downloaded from {$file->url}, not {$url}");
+                    }
+                }
+            }
+        }
+    }
+
     public function file(Platform $platform, string $component, Arch $arch): LockedFile
     {
         return $this->files[$platform->value][$component][$arch->value]

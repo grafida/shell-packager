@@ -37,8 +37,24 @@ final class ConfigTest extends TestCase
 
     public function testAMissingRuntimeIsNamed(): void
     {
-        $this->expectExceptionMessage("pins no linux 'shell' runtime (runtimes.linux.shell)");
-        Fixture::config()->runtime('shell');
+        $this->expectExceptionMessage("pins no linux 'sfx' runtime (runtimes.linux.sfx)");
+        Fixture::config()->runtime('sfx');
+    }
+
+    public function testOldShellPinsAreRefusedWithTheWayOut(): void
+    {
+        $pin = ['url' => 'https://x/{arch}', 'sha256' => []];
+
+        foreach ([['linux' => ['shell' => $pin]], ['macos' => ['launcher' => $pin]], ['shell' => $pin]] as $runtimes) {
+            try {
+                Fixture::config($runtimes);
+                self::fail('accepted ' . json_encode($runtimes));
+            } catch (PackagerException $e) {
+                self::assertMatchesRegularExpression('/runtimes\.(linux|macos)\.(shell|launcher)/', $e->getMessage());
+                self::assertStringContainsString('"shell": {"version"', $e->getMessage());
+                self::assertStringContainsString('shell-packager update', $e->getMessage());
+            }
+        }
     }
 
     public function testAMissingFileIsNamed(): void

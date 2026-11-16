@@ -36,16 +36,15 @@ use Grafida\ShellPackager\Windows\WindowsConfig;
  *     ],
  *     "ini": {"memory_limit": "512M", "opcache.enable": false}
  *   },
+ *   "shell": {"version": "^0.4"},   // the shell and launcher, by version; see Shell\ShellConfig
  *   "runtimes": {
  *     "linux": {
- *       "shell":    {"url": "https://…/0.2.0/grafida-shell-linux-{arch}",    "sha256": {"x86_64": "…", "aarch64": "…"}},
- *       "launcher": {"url": "https://…/0.2.0/grafida-launcher-linux-{arch}", "sha256": {…}},
- *       "sfx":      {"url": "https://…/sfx-…/linux-{arch}.standard.sfx",     "sha256": {…}}
+ *       "sfx":              {"url": "https://…/sfx-…/linux-{arch}.standard.sfx", "sha256": {"x86_64": "…", "aarch64": "…"}},
+ *       "appimage-runtime": {"url": "https://…/20251108/runtime-{arch}",         "sha256": {…}}
  *     },
  *     "macos": {   // a url per architecture when they come from different releases
- *       "shell": {"url": {"aarch64": "https://…/0.2.0/grafida-shell-macos-arm64", "x86_64": "https://…/0.4.0/grafida-shell-macos-x86_64"},
- *                 "sha256": {"aarch64": "…", "x86_64": "…"}},
- *       "sfx":   {"url": "https://…/sfx-…/macos-{arch}.standard.sfx",        "sha256": {"aarch64": "…", "x86_64": "…"}}
+ *       "sfx": {"url": {"aarch64": "https://…/sfx-…/macos-aarch64.standard.sfx", "x86_64": "https://…/sfx-…/macos-x86_64.standard.sfx"},
+ *               "sha256": {"aarch64": "…", "x86_64": "…"}}
  *     }
  *   },
  *   "linux": {
@@ -69,6 +68,8 @@ use Grafida\ShellPackager\Windows\WindowsConfig;
  *
  * `runtimes` is grouped by platform. A flat `runtimes` (names straight under it, as before
  * macOS) still means Linux; mixing the two shapes is an error, never a half-read configuration.
+ * The shell and launcher are no longer runtimes: a `shell` or `launcher` entry there is refused,
+ * with how to move to the `shell` block (pinned by version, resolved into shell-package.lock).
  *
  * Under `vendor`, `include` reads the `--no-dev` staging install, never the app's own `vendor/`.
  */
@@ -277,6 +278,14 @@ final readonly class Config
 
         foreach ($grouped === [] ? [Platform::Linux->value => $flat] : $grouped as $platform => $pins) {
             foreach ($pins as $name => $runtime) {
+                if (\in_array((string) $name, ['shell', 'launcher'], true)) {
+                    throw new PackagerException(
+                        "runtimes.{$platform}.{$name} is no longer supported: the shell and launcher are pinned by version, for every "
+                        . 'platform at once, in the top-level shell block ("shell": {"version": "^0.4"}). Remove every runtimes '
+                        . "shell and launcher entry, add the block, and run shell-packager update to write the lock."
+                    );
+                }
+
                 if (!\is_array($runtime)) {
                     throw new PackagerException("runtimes.{$platform}.{$name} must be an object.");
                 }

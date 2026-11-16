@@ -12,10 +12,11 @@ declare(strict_types=1);
 namespace Grafida\ShellPackager;
 
 /**
- * A prebuilt binary the package is made of (the shell, the launcher, the phpmicro SFX): where to
- * download it per architecture, and the SHA-256 it must have. The pin is the app's, committed in
- * its configuration; a hash published beside the download is never consulted, because that would
- * only detect corruption, not substitution.
+ * A prebuilt binary the package is made of, pinned by URL (the phpmicro SFX, the AppImage runtime,
+ * nfpm): where to download it per architecture, and the SHA-256 it must have. The pin is the app's,
+ * committed in its configuration; for these, a hash published beside the download is never
+ * consulted. The shell and launcher are not pinned this way: they are pinned by version and their
+ * hashes come from GitHub's digests, recorded in the lock (Shell\ShellConfig, Shell\ShellLock).
  *
  * `{arch}` in the URL stands for the architecture (x86_64/aarch64). A URL without it names one file.
  * When the architectures come from different releases (macOS: the arm64 and x86_64 pins of one app
@@ -39,22 +40,18 @@ final readonly class Runtime
 
     /**
      * The newest release of a runtime, per platform and architecture: `{"latest": true}` in the
-     * configuration. GitHub's `releases/latest/download` redirect names the shell, the launcher and
-     * the AppImage runtime; the SFX comes from phpmicro's rolling `sfx-latest` release.
+     * configuration. The SFX comes from phpmicro's rolling `sfx-latest` release, the AppImage
+     * runtime from GitHub's `releases/latest/download` redirect. The shell has no such entry: it is
+     * pinned by version instead (`"shell": {"version": "*"}` and `shell-packager update`).
      *
      * @return array<string, string> arch name => URL
      */
     public static function latestUrls(string $name, string $platform): array
     {
-        $shell = 'https://github.com/grafida/shell/releases/latest/download/';
         $sfx   = 'https://github.com/grafida/phpmicro/releases/download/sfx-latest/';
         $appimage = 'https://github.com/AppImage/type2-runtime/releases/latest/download/';
 
         $urls = match ([$name, $platform]) {
-            ['shell', 'linux']     => [Arch::X86_64->value => $shell . 'grafida-shell-linux-x86_64', Arch::Aarch64->value => $shell . 'grafida-shell-linux-aarch64'],
-            ['shell', 'macos']     => [Arch::X86_64->value => $shell . 'grafida-shell-macos-x86_64', Arch::Aarch64->value => $shell . 'grafida-shell-macos-arm64'],
-            ['shell', 'windows']   => [Arch::X86_64->value => $shell . 'grafida-shell-windows-x86_64.exe'],
-            ['launcher', 'linux']  => [Arch::X86_64->value => $shell . 'grafida-launcher-linux-x86_64', Arch::Aarch64->value => $shell . 'grafida-launcher-linux-aarch64'],
             ['sfx', 'linux'],
             ['sfx', 'macos']       => [Arch::X86_64->value => $sfx . "{$platform}-x86_64.standard.sfx", Arch::Aarch64->value => $sfx . "{$platform}-aarch64.standard.sfx"],
             ['sfx', 'windows']     => [Arch::X86_64->value => $sfx . 'windows-x86_64.standard.sfx'],

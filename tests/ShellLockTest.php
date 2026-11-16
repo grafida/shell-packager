@@ -13,6 +13,7 @@ namespace Grafida\ShellPackager\Tests;
 
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
+use Grafida\ShellPackager\Shell\LockedFile;
 use Grafida\ShellPackager\Shell\Resolver;
 use Grafida\ShellPackager\Shell\ShellConfig;
 use Grafida\ShellPackager\Shell\ShellLock;
@@ -81,5 +82,48 @@ final class ShellLockTest extends TestCase
         $this->expectException(PackagerException::class);
         $this->expectExceptionMessage('/some/where/shell-package.lock');
         ShellLock::fromJson($break(self::lock()->toJson()), '/some/where/shell-package.lock');
+    }
+
+    /** A lock as GitHub would have it: browser_download_url of the configured repository. */
+    private static function githubLock(): ShellLock
+    {
+        $lock  = self::lock();
+        $files = [];
+
+        foreach ($lock->files as $platform => $components) {
+            foreach ($components as $component => $byArch) {
+                foreach ($byArch as $arch => $file) {
+                    $files[$platform][$component][$arch] = new LockedFile($file->name, "https://github.com/grafida/shell/releases/download/0.4.2/{$file->name}", $file->sha256);
+                }
+            }
+        }
+
+        return new ShellLock($lock->contentHash, $lock->repository, $lock->constraint, $lock->version, $lock->tag, $files);
+    }
+
+    public function testALockMustAgreeWithTheConfigurationItClaims(): void
+    {
+        $shell = ShellConfig::fromArray(['version' => '^0.4'], __DIR__);
+        self::githubLock()->verify($shell, 'x.lock');
+        $this->addToAssertionCount(1);
+
+        $tampered = [
+            'another repository' => static fn (string $j): string => str_replace('"repository": "grafida/shell"', '"repository": "evil/shell"', $j),
+            'another name'       => static fn (string $j): string => preg_replace('/"name": "grafida-shell-linux-x86_64"/', '"name": "other"', $j, 1) ?? '',
+            'another host'       => static fn (string $j): string => preg_replace('#"url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-macos-arm64"#', '"url": "https://evil.example/grafida-shell-macos-arm64"', $j, 1) ?? '',
+            'another release'    => static fn (string $j): string => preg_replace('#/download/0.4.2/grafida-shell-windows#', '/download/0.1.0/grafida-shell-windows', $j, 1) ?? '',
+        ];
+
+        foreach ($tampered as $what => $edit) {
+            $json = $edit(self::githubLock()->toJson());
+            self::assertNotSame(self::githubLock()->toJson(), $json, $what);
+
+            try {
+                ShellLock::fromJson($json, 'x.lock')->verify($shell, 'x.lock');
+                self::fail("accepted a lock with {$what}");
+            } catch (PackagerException $e) {
+                self::assertStringContainsString('x.lock', $e->getMessage(), $what);
+            }
+        }
     }
 }

@@ -44,27 +44,27 @@ final class MacosConfigTest extends TestCase
     {
         $config = self::load([]);
 
-        self::assertStringEndsWith('/grafida-shell-macos-arm64', $config->runtime('shell', Platform::Macos)->url(Arch::Aarch64));
-        self::assertStringEndsWith('/grafida-shell-linux-x86_64', $config->runtime('shell')->url(Arch::X86_64));
+        self::assertStringEndsWith('/macos-aarch64.standard.sfx', $config->runtime('sfx', Platform::Macos)->url(Arch::Aarch64));
+        self::assertStringEndsWith('/linux-x86_64.standard.sfx', $config->runtime('sfx')->url(Arch::X86_64));
         self::assertSame('linux', Platform::Linux->value);
     }
 
     public function testAFlatRuntimesIsLinux(): void
     {
         $pin    = ['url' => 'https://example.invalid/x-{arch}', 'sha256' => ['x86_64' => str_repeat('a', 64)]];
-        $config = self::load(['runtimes' => ['shell' => $pin]]);
+        $config = self::load(['runtimes' => ['sfx' => $pin]]);
 
-        self::assertSame('https://example.invalid/x-{arch}', $config->runtime('shell', Platform::Linux)->url);
-        $this->expectExceptionMessage("pins no macos 'shell' runtime");
-        $config->runtime('shell', Platform::Macos);
+        self::assertSame('https://example.invalid/x-{arch}', $config->runtime('sfx', Platform::Linux)->url);
+        $this->expectExceptionMessage("pins no macos 'sfx' runtime");
+        $config->runtime('sfx', Platform::Macos);
     }
 
     public function testMixedRuntimeShapesAreRefused(): void
     {
         $pin = ['url' => 'https://example.invalid/x', 'sha256' => ['aarch64' => str_repeat('a', 64)]];
         $this->expectException(PackagerException::class);
-        $this->expectExceptionMessage('mixes platform groups (macos) with ungrouped pins (shell)');
-        self::load(['runtimes' => ['shell' => $pin, 'macos' => ['shell' => $pin]]]);
+        $this->expectExceptionMessage('mixes platform groups (macos) with ungrouped pins (sfx)');
+        self::load(['runtimes' => ['sfx' => $pin, 'macos' => ['sfx' => $pin]]]);
     }
 
     public function testTheMacosSectionHasDefaults(): void

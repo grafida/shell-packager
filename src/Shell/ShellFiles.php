@@ -21,7 +21,8 @@ use Grafida\ShellPackager\Platform;
  * Where each shell file of a build comes from, in this order: a `--local` file, a `shell.local`
  * file (both announced as UNPINNED), or the lock beside the configuration. A build from the lock
  * makes no GitHub API call. With no lock, the first file that needs one resolves and writes it,
- * as `update` does; a lock that no longer matches the configuration fails the build.
+ * as `update` does; a lock that no longer matches the configuration fails the build, and so does
+ * one whose files are not the configured repository's release assets (ShellLock::verify()).
  */
 final class ShellFiles
 {
@@ -120,12 +121,16 @@ final class ShellFiles
             return $lock;
         }
 
-        if ($lock->contentHash !== $this->config->shell()->contentHash()) {
+        $shell = $this->config->shell();
+
+        if ($lock->contentHash !== $shell->contentHash()) {
             throw new PackagerException(
                 "{$path} is stale: shell.version, shell.repository or shell.assets changed since it was written. "
                 . "Run shell-packager update --config={$this->config->path} to resolve the shell again."
             );
         }
+
+        $lock->verify($shell, $path);
 
         return $this->lock = $lock;
     }

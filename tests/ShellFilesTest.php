@@ -41,6 +41,12 @@ final class ShellFilesTest extends TestCase
     /** @var array<string, string> asset name => the digest the fake GitHub reports, when not the file's own */
     private array $wrongDigest = [];
 
+    /**
+     * Whether the fake release has GitHub's URLs (what a lock read back must have), with the files
+     * already in the cache so nothing is downloaded; or file:// URLs, which are downloaded.
+     */
+    private bool $github = true;
+
     protected function setUp(): void
     {
         // Real: the configuration's root is, and local paths are made from it.
@@ -50,6 +56,7 @@ final class ShellFilesTest extends TestCase
         foreach (self::names() as $name) {
             Filesystem::write($this->dir . '/release/' . $name, "the {$name} file");
             Filesystem::write($this->dir . '/app/local/' . $name, "a local {$name}");
+            Filesystem::write($this->dir . '/cache/shell/grafida/shell/0.4.2/' . $name, "the {$name} file");
         }
     }
 
@@ -91,7 +98,8 @@ final class ShellFilesTest extends TestCase
 
         foreach (self::names() as $name) {
             $sha = $this->wrongDigest[$name] ?? hash('sha256', "the {$name} file");
-            $assets[$name] = new ReleaseAsset($name, "file://{$dir}/release/{$name}", $sha);
+            $url = $this->github ? "https://github.com/grafida/shell/releases/download/0.4.2/{$name}" : "file://{$dir}/release/{$name}";
+            $assets[$name] = new ReleaseAsset($name, $url, $sha);
         }
 
         $releases = [new Release('0.4.2', false, $assets)];
@@ -210,6 +218,7 @@ final class ShellFilesTest extends TestCase
 
         Filesystem::remove($this->dir . '/cache');
         unlink($this->lockPath());
+        $this->github = false;
         $this->wrongDigest['grafida-shell-windows-x86_64.exe'] = str_repeat('0', 64);
 
         try {
@@ -232,5 +241,20 @@ final class ShellFilesTest extends TestCase
 
         self::assertSame($first, Filesystem::read($this->lockPath()));
         self::assertNotEmpty(array_filter($this->said, static fn (string $l): bool => str_contains($l, 'unchanged')));
+    }
+
+    public function testAHandEditedLockIsRefused(): void
+    {
+        $this->files($this->config())->update();
+        $lock = Filesystem::read($this->lockPath());
+        Filesystem::write($this->lockPath(), str_replace(
+            'https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-linux-x86_64"',
+            'https://evil.example/grafida-shell-linux-x86_64"',
+            $lock
+        ));
+
+        $this->expectException(PackagerException::class);
+        $this->expectExceptionMessage('does not match the configuration');
+        $this->files($this->config(), offline: true)->path(Platform::Macos, 'shell', Arch::Aarch64);
     }
 }

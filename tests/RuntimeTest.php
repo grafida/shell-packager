@@ -66,35 +66,44 @@ final class RuntimeTest extends TestCase
 
     public function testLatestNamesTheNewestReleasePerPlatformAndArchitecture(): void
     {
-        $shell = Runtime::fromArray('shell', ['latest' => true], 'macos');
+        $sfx = Runtime::fromArray('sfx', ['latest' => true], 'macos');
 
-        self::assertTrue($shell->latest);
-        self::assertSame('https://github.com/grafida/shell/releases/latest/download/grafida-shell-macos-arm64', $shell->url(Arch::Aarch64));
-        self::assertSame('https://github.com/grafida/shell/releases/latest/download/grafida-shell-macos-x86_64', $shell->url(Arch::X86_64));
-
-        $sfx = Runtime::fromArray('sfx', ['latest' => true], 'linux');
-
-        self::assertSame('https://github.com/grafida/phpmicro/releases/download/sfx-latest/linux-aarch64.standard.sfx', $sfx->url(Arch::Aarch64));
-        self::assertSame('https://github.com/grafida/shell/releases/latest/download/grafida-launcher-linux-x86_64', Runtime::fromArray('launcher', ['latest' => true], 'linux')->url(Arch::X86_64));
+        self::assertTrue($sfx->latest);
+        self::assertSame('https://github.com/grafida/phpmicro/releases/download/sfx-latest/macos-aarch64.standard.sfx', $sfx->url(Arch::Aarch64));
+        self::assertSame('https://github.com/grafida/phpmicro/releases/download/sfx-latest/linux-aarch64.standard.sfx', Runtime::fromArray('sfx', ['latest' => true], 'linux')->url(Arch::Aarch64));
+        self::assertSame('https://github.com/grafida/phpmicro/releases/download/sfx-latest/windows-x86_64.standard.sfx', Runtime::fromArray('sfx', ['latest' => true], 'windows')->url(Arch::X86_64));
         self::assertSame('https://github.com/AppImage/type2-runtime/releases/latest/download/runtime-aarch64', Runtime::fromArray('appimage-runtime', ['latest' => true], 'linux')->url(Arch::Aarch64));
+    }
+
+    public function testTheShellHasNoLatestAnyMore(): void
+    {
+        // shell.version "*" with update replaces it.
+        foreach ([['shell', 'linux'], ['shell', 'macos'], ['shell', 'windows'], ['launcher', 'linux']] as [$name, $platform]) {
+            try {
+                Runtime::latestUrls($name, $platform);
+                self::fail("{$platform} {$name} still has a latest release");
+            } catch (PackagerException) {
+                $this->addToAssertionCount(1);
+            }
+        }
     }
 
     public function testLatestCannotBeMixedWithAPin(): void
     {
         $this->expectException(PackagerException::class);
-        Runtime::fromArray('shell', ['latest' => true, 'url' => 'https://x/y', 'sha256' => ['aarch64' => self::A]]);
+        Runtime::fromArray('sfx', ['latest' => true, 'url' => 'https://x/y', 'sha256' => ['aarch64' => self::A]]);
     }
 
     public function testOnlyTrueMeansLatest(): void
     {
         $this->expectException(PackagerException::class);
-        Runtime::fromArray('shell', ['latest' => false]);
+        Runtime::fromArray('sfx', ['latest' => false]);
     }
 
     public function testThereIsNoLatestForARuntimeThatDoesNotExistOnThePlatform(): void
     {
         $this->expectException(PackagerException::class);
-        Runtime::fromArray('launcher', ['latest' => true], 'macos');
+        Runtime::fromArray('appimage-runtime', ['latest' => true], 'macos');
     }
 
     public function testLatestWorksInAConfiguredRuntimesSection(): void
