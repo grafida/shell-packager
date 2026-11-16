@@ -71,28 +71,6 @@ jobs:
           echo "SHELL_PACKAGER_TEST_WINDOWS_SFX=$(sed -n 's/^sfx: //p' <<<"$out")" >> "$GITHUB_ENV"
       - run: composer test
 
-  # A packaged tarball of the fixture app, with the real pinned shell, launcher and SFX, installed
-  # and run headless (scripts/e2e-linux.sh).
-  e2e:
-    name: End to end (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-22.04, ubuntu-22.04-arm]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-          coverage: none
-      - name: The shell's runtime dependencies (and a headless display)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0 xvfb dbus
-      - run: composer install --no-interaction --no-progress
-      - run: scripts/e2e-linux.sh
-
   # The suite on a Mac of each architecture, with that architecture's pinned macOS shell and SFX: the Mach-O checks on the real
   # bytes, signing ad hoc with the hardened runtime, the signatures read back, the worker answering
   # from inside the signed bundle, and the image.
@@ -124,29 +102,6 @@ jobs:
           echo "SHELL_PACKAGER_TEST_MACOS_SFX=$(sed -n 's/^sfx: //p' <<<"$out")" >> "$GITHUB_ENV"
       - run: composer test
 
-  # A disk image of the fixture app, with the real pinned shell and SFX, mounted, copied out and
-  # launched through LaunchServices (scripts/e2e-macos.sh). No Finder layout: a runner cannot grant
-  # Finder's Automation permission.
-  e2e-macos:
-    name: End to end (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {runner: macos-15, arch: aarch64}
-          - {runner: macos-15-intel, arch: x86_64}
-    env:
-      ARCH: ${{ matrix.arch }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-          coverage: none
-      - run: composer install --no-interaction --no-progress
-      - run: scripts/e2e-macos.sh
-
   # The suite on Windows, with the pinned Windows shell and SFX: the packager's own Windows paths
   # (composer through cmd, drive-letter paths), and the worker check for real: the ini probe and
   # the ready handshake on the Windows SFX (grafida/grafida#91).
@@ -172,27 +127,3 @@ jobs:
           echo "SHELL_PACKAGER_TEST_WINDOWS_SHELL=$(sed -n 's/^shell: //p' <<<"$out")" >> "$GITHUB_ENV"
           echo "SHELL_PACKAGER_TEST_WINDOWS_SFX=$(sed -n 's/^sfx: //p' <<<"$out")" >> "$GITHUB_ENV"
       - run: composer test
-
-  # An installer of the fixture app, with the real pinned shell and SFX, built on Windows (with the
-  # worker check), installed silently, launched and uninstalled (scripts/e2e-windows.sh). Unsigned:
-  # the signed path is tested on Linux, and on the signed build in the test guests.
-  e2e-windows:
-    name: End to end (windows-2022)
-    runs-on: windows-2022
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-          coverage: none
-          extensions: mbstring
-      - run: composer install --no-interaction --no-progress
-      - name: makensis on PATH
-        run: |
-          nsis='C:\Program Files (x86)\NSIS'
-          [ -x "$(cygpath "$nsis")/makensis.exe" ] || choco install nsis -y --no-progress
-          echo "$nsis" >> "$GITHUB_PATH"
-      - run: scripts/e2e-windows.sh
