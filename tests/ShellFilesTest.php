@@ -38,14 +38,11 @@ final class ShellFilesTest extends TestCase
 
     private int $listings = 0;
 
-    /** @var array<string, string> asset name => the digest the fake GitHub reports, when not the file's own */
-    private array $wrongDigest = [];
-
     /**
-     * Whether the fake release has GitHub's URLs (what a lock read back must have), with the files
-     * already in the cache so nothing is downloaded; or file:// URLs, which are downloaded.
+     * The repository in the fake release's URLs, as GitHub spells it. The files are already in the
+     * cache, so nothing is downloaded (a digest mismatch on download is FetcherTest's).
      */
-    private bool $github = true;
+    private string $served = 'grafida/shell';
 
     protected function setUp(): void
     {
@@ -93,13 +90,10 @@ final class ShellFilesTest extends TestCase
 
     private function source(): ReleaseSource
     {
-        $dir    = \PHP_OS_FAMILY === 'Windows' ? '/' . str_replace('\\', '/', $this->dir) : $this->dir;
         $assets = [];
 
         foreach (self::names() as $name) {
-            $sha = $this->wrongDigest[$name] ?? hash('sha256', "the {$name} file");
-            $url = $this->github ? "https://github.com/grafida/shell/releases/download/0.4.2/{$name}" : "file://{$dir}/release/{$name}";
-            $assets[$name] = new ReleaseAsset($name, $url, $sha);
+            $assets[$name] = new ReleaseAsset($name, "https://github.com/{$this->served}/releases/download/0.4.2/{$name}", hash('sha256', "the {$name} file"));
         }
 
         $releases = [new Release('0.4.2', false, $assets)];
@@ -209,23 +203,38 @@ final class ShellFilesTest extends TestCase
         self::assertSame($this->dir . '/release/grafida-shell-macos-arm64', $this->files($config, $fetcher, true)->path(Platform::Linux, 'shell', Arch::X86_64));
     }
 
-    public function testUpdateDownloadsAllSevenAndChecksTheDigest(): void
+    public function testUpdateFetchesAllSeven(): void
     {
         $lock = $this->files($this->config())->update();
 
         self::assertSame('0.4.2', $lock->version);
         self::assertCount(7, (array) glob($this->dir . '/cache/shell/grafida/shell/0.4.2/*'));
+    }
 
-        Filesystem::remove($this->dir . '/cache');
-        unlink($this->lockPath());
-        $this->github = false;
-        $this->wrongDigest['grafida-shell-windows-x86_64.exe'] = str_repeat('0', 64);
+    public function testARepositoryInOtherCapitalsStillBuilds(): void
+    {
+        // GitHub answers for Grafida/Shell, and its URLs say grafida/shell.
+        foreach (self::names() as $name) {
+            Filesystem::write($this->dir . '/cache/shell/Grafida/Shell/0.4.2/' . $name, "the {$name} file");
+        }
+
+        $config = $this->config(['version' => '^0.4', 'repository' => 'Grafida/Shell']);
+        $this->files($config)->update();
+
+        self::assertFileExists($this->files($config, offline: true)->path(Platform::Windows, 'shell', Arch::X86_64));
+    }
+
+    public function testARenamedRepositoryIsNamedAndNoLockIsWritten(): void
+    {
+        // The repository moved: GitHub redirects the listing, and its URLs carry the new name.
+        $this->served = 'grafida/renamed';
 
         try {
             $this->files($this->config())->update();
-            self::fail('An asset that does not match its digest was accepted.');
+            self::fail('A lock that would be refused on reading was written.');
         } catch (PackagerException $e) {
-            self::assertStringContainsString('grafida-shell-windows-x86_64.exe', $e->getMessage());
+            self::assertStringContainsString('grafida/renamed', $e->getMessage());
+            self::assertStringContainsString('shell.repository', $e->getMessage());
         }
 
         self::assertFileDoesNotExist($this->lockPath());

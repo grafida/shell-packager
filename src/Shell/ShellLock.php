@@ -230,10 +230,18 @@ final readonly class ShellLock
                         throw $fail("the {$platform} {$component} for {$arch} is {$file->name}, the configuration names " . json_encode($name));
                     }
 
-                    $url = 'https://github.com/' . $this->repository . '/releases/download/' . rawurlencode($this->tag) . '/' . rawurlencode($file->name);
+                    // GitHub spells the repository its own way in the URL (Grafida/Shell is served as
+                    // grafida/shell), so owner/name is compared without case; a different name means the
+                    // repository moved, and the error says what it is called now.
+                    $release = '/releases/download/' . rawurlencode($this->tag) . '/' . rawurlencode($file->name);
+                    $served  = preg_match('#^https://github\.com/([^/]+/[^/]+)' . preg_quote($release, '#') . '$#', $file->url, $m) === 1 ? $m[1] : null;
 
-                    if ($file->url !== $url) {
-                        throw $fail("{$file->name} is to be downloaded from {$file->url}, not {$url}");
+                    if ($served === null) {
+                        throw $fail("{$file->name} is to be downloaded from {$file->url}, not https://github.com/{$this->repository}{$release}");
+                    }
+
+                    if (strcasecmp($served, $this->repository) !== 0) {
+                        throw $fail("GitHub serves {$this->repository}'s files as {$served}: the repository was renamed or moved, so set shell.repository to {$served}");
                     }
                 }
             }

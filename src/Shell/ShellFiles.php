@@ -77,6 +77,8 @@ final class ShellFiles
         $source = ($this->source)();
         ($this->say)("Resolving shell.version '{$shell->constraint}' against the releases of {$shell->repository} (through {$source->describe()})");
         $lock = Resolver::resolve($shell, $source->releases($shell->repository));
+        // What a build will check the lock against, before anything is downloaded or written.
+        $lock->verify($shell, $path);
 
         foreach ($lock->files as $components) {
             foreach ($components as $byArch) {
