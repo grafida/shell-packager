@@ -15,6 +15,7 @@ use Grafida\ShellPackager\Linux\PackageConfig;
 use Grafida\ShellPackager\Linux\AppImageConfig;
 use Grafida\ShellPackager\Linux\PkgbuildConfig;
 use Grafida\ShellPackager\Macos\MacosConfig;
+use Grafida\ShellPackager\Shell\ShellConfig;
 use Grafida\ShellPackager\Windows\WindowsConfig;
 
 /**
@@ -102,6 +103,9 @@ final readonly class Config
         public ?PackageConfig $linuxPackage = null,
         public ?AppImageConfig $appImage = null,
         public ?PkgbuildConfig $pkgbuild = null,
+        public ?ShellConfig $shell = null,
+        /** the configuration file's real path (the lock file sits beside it) */
+        public string $path = '',
     ) {
     }
 
@@ -207,6 +211,8 @@ final readonly class Config
             linuxPackage: isset($linux['package']) ? PackageConfig::fromArray(self::object($linux, 'package', 'linux')) : null,
             appImage: AppImageConfig::fromArray(self::optionalObject($linux, 'appimage')),
             pkgbuild: isset($linux['pkgbuild']) ? PkgbuildConfig::fromArray(self::object($linux, 'pkgbuild', 'linux')) : null,
+            shell: isset($data['shell']) ? ShellConfig::fromArray(self::object($data, 'shell', $real), $root) : null,
+            path: $real,
         );
     }
 
@@ -214,6 +220,11 @@ final readonly class Config
     {
         return $this->runtimes[$platform->value][$name]
             ?? throw new PackagerException("The packaging configuration pins no {$platform->value} '{$name}' runtime (runtimes.{$platform->value}.{$name}).");
+    }
+
+    public function shell(): ShellConfig
+    {
+        return $this->shell ?? throw new PackagerException('The packaging configuration has no \'shell\' section: pin the shell with "shell": {"version": "…"} (shell.version, a Composer version constraint).');
     }
 
     public function linuxPackage(): PackageConfig
