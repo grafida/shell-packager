@@ -1,0 +1,78 @@
+[
+    {
+        "assets": [
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-launcher-linux-aarch64",
+                "digest": "sha256:0caa881bff8076e27772b060311099c7d431bd310ca8840108647c257f64983d",
+                "name": "grafida-launcher-linux-aarch64"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-launcher-linux-aarch64.sha256",
+                "digest": "sha256:1d192f9dcf33889c22e3cbb56a610eba46213101ac0c480f79d89f37c4c3fe28",
+                "name": "grafida-launcher-linux-aarch64.sha256"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-launcher-linux-x86_64",
+                "digest": "sha256:4ad3aa974895c2b9ca3559d47094f87ca616ea458fd7988ec59e57f58df5338e",
+                "name": "grafida-launcher-linux-x86_64"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-launcher-linux-x86_64.sha256",
+                "digest": "sha256:02da8d8b278d5b42f3c7aedcbb40f5d5d4861ee6bf435a710afa7d9d6da0ae21",
+                "name": "grafida-launcher-linux-x86_64.sha256"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-linux-aarch64",
+                "digest": "sha256:6ff270aa129e1ee69e920cdd03d1929d15bf9f97012f5973c3fb1a06fd6f2fb9",
+                "name": "grafida-shell-linux-aarch64"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-linux-aarch64.sha256",
+                "digest": "sha256:cc739bd8e4af3c585ee98aa18227c14d2a526e0aca5417367ad77f8a2f3616fd",
+                "name": "grafida-shell-linux-aarch64.sha256"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-linux-x86_64",
+                "digest": "sha256:432b734f15febd3964064f585e2e2998706d24843c1febbc9f11d3be23da9340",
+                "name": "grafida-shell-linux-x86_64"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-linux-x86_64.sha256",
+                "digest": "sha256:8ab5e39ed78b817eb2134f38605a0ba382d78998d925e5a06648ab6b9658b064",
+                "name": "grafida-shell-linux-x86_64.sha256"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-macos-arm64",
+                "digest": "sha256:91d60a059e3d5990de8a350bbdd0b0dde06cb8d60e433ce563f5f33cc9e63376",
+                "name": "grafida-shell-macos-arm64"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-macos-arm64.sha256",
+                "digest": "sha256:04bb56ece6eb5e554406c6366f26991a77c4b109a76cadc86fa65055e35d7c25",
+                "name": "grafida-shell-macos-arm64.sha256"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-macos-x86_64",
+                "digest": "sha256:cc4dfcfed58f04bc55751384b66220c7f73d29d72b5724642767220ffee1c855",
+                "name": "grafida-shell-macos-x86_64"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-macos-x86_64.sha256",
+                "digest": "sha256:b57815c5fc9204795d040f376f60c8d6238d7636f776ba23fc3595c0dc2f76cf",
+                "name": "grafida-shell-macos-x86_64.sha256"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-windows-x86_64.exe",
+                "digest": "sha256:13723eceb0fc56428de4f8c5a1f43c613aac1f8af6b709bc01655fdc347027b1",
+                "name": "grafida-shell-windows-x86_64.exe"
+            },
+            {
+                "browser_download_url": "https://github.com/grafida/shell/releases/download/0.4.2/grafida-shell-windows-x86_64.exe.sha256",
+                "digest": "sha256:971591865badfea21fb97b37dcc8bdeb2662eff8839b8a7d199829e6854566ae",
+                "name": "grafida-shell-windows-x86_64.exe.sha256"
+            }
+        ],
+        "draft": false,
+        "tag_name": "0.4.2"
+    }
+]
