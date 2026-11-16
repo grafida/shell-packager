@@ -67,6 +67,10 @@ final class ShellLockTest extends TestCase
             'an extra slot'    => [static fn (string $j): string => preg_replace('/"linux": \{/', '"linux": {"extra": {},', $j, 1) ?? ''],
             'a bad hash'       => [static fn (string $j): string => preg_replace('/"sha256": "/', '"sha256": "XYZ', $j, 1) ?? ''],
             'no version'       => [static fn (string $j): string => preg_replace('/"version": "[^"]*",/', '', $j, 1) ?? ''],
+            // The name, version and repository become cache paths: none may leave the cache.
+            'a path as a name' => [static fn (string $j): string => preg_replace('/"name": "[^"]*"/', '"name": "../../evil"', $j, 1) ?? ''],
+            'a path as version' => [static fn (string $j): string => preg_replace('/"version": "[^"]*"/', '"version": "../.."', $j, 1) ?? ''],
+            'a bad repository' => [static fn (string $j): string => preg_replace('/"repository": "[^"]*"/', '"repository": "../x/y"', $j, 1) ?? ''],
         ];
     }
 

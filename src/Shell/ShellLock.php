@@ -29,6 +29,9 @@ use Grafida\ShellPackager\Platform;
  */
 final readonly class ShellLock
 {
+    /** A file or directory name: no separator, and not `.` or `..`. */
+    private const string NAME = '/^(?!\.\.?$)[A-Za-z0-9._+-]+$/';
+
     private const string README = 'Written by shell-packager update. Commit it. Do not edit it by hand.';
 
     /** @param array<string, array<string, array<string, LockedFile>>> $files platform => component => arch => file */
@@ -118,8 +121,14 @@ final readonly class ShellLock
                         throw $fail("{$key}.sha256 is not a SHA-256");
                     }
 
+                    $name = $text($file['name'] ?? null, "{$key}.name");
+
+                    if (preg_match(self::NAME, $name) !== 1) {
+                        throw $fail("{$key}.name is not a release asset name");
+                    }
+
                     $out[$platform][$component][$arch] = new LockedFile(
-                        $text($file['name'] ?? null, "{$key}.name"),
+                        $name,
                         $text($file['url'] ?? null, "{$key}.url"),
                         $sha256,
                     );
@@ -127,11 +136,23 @@ final readonly class ShellLock
             }
         }
 
+        // The repository, version and names become cache paths: none may climb out of the cache.
+        $repository = $text($shell['repository'] ?? null, 'shell.repository');
+        $version    = $text($shell['version'] ?? null, 'shell.version');
+
+        if (preg_match('#^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$#', $repository) !== 1 || str_contains($repository, '..')) {
+            throw $fail('shell.repository is not owner/name');
+        }
+
+        if (preg_match(self::NAME, $version) !== 1) {
+            throw $fail('shell.version is not a version');
+        }
+
         return new self(
             $hash,
-            $text($shell['repository'] ?? null, 'shell.repository'),
+            $repository,
             $text($shell['constraint'] ?? null, 'shell.constraint'),
-            $text($shell['version'] ?? null, 'shell.version'),
+            $version,
             $text($shell['tag'] ?? null, 'shell.tag'),
             $out,
         );

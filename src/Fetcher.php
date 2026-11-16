@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager;
 
+use Grafida\ShellPackager\Shell\LockedFile;
+
 /**
  * Downloads a pinned runtime into a cache keyed by its SHA-256, and refuses anything whose hash is
  * not the pinned one. A cached file is re-hashed on every use, so a damaged or replaced cache entry
@@ -22,6 +24,9 @@ namespace Grafida\ShellPackager;
  *
  * A local file may stand in for a runtime (`--local shell=PATH`), for testing an unreleased build.
  * It is announced as UNPINNED on stderr, every time.
+ *
+ * The shell and launcher come from the lock instead (fetchLocked(), through Shell\ShellFiles):
+ * cached by repository and version, checked against the SHA-256 the lock recorded from GitHub.
  */
 final class Fetcher
 {
@@ -65,10 +70,7 @@ final class Fetcher
     public function fetch(Runtime $runtime, Arch $arch): string
     {
         if (isset($this->local[$runtime->name])) {
-            $path = $this->local[$runtime->name];
-            fwrite(\STDERR, "WARNING: {$runtime->name} is UNPINNED: using the local file {$path} (sha256 " . hash_file('sha256', $path) . ").\n");
-
-            return $path;
+            return $this->local($runtime->name);
         }
 
         if ($runtime->latest) {
@@ -92,7 +94,7 @@ final class Fetcher
             throw new PackagerException("Cannot create the cache directory {$dir}.");
         }
 
-        $partial = $path . '.part';
+        $partial = self::partial($path);
         $this->download($url, $partial);
         $actual = hash_file('sha256', $partial);
 
@@ -108,6 +110,67 @@ final class Fetcher
         chmod($path, 0o755);
 
         return $path;
+    }
+
+    /** The --local file for $runtime, announced as UNPINNED. */
+    public function local(string $runtime): string
+    {
+        return self::unpinned($runtime, $this->local[$runtime] ?? throw new PackagerException("No --local file is given for {$runtime}."));
+    }
+
+    /** Announces a local file standing in for a runtime, with its hash, and returns it. */
+    public static function unpinned(string $name, string $path): string
+    {
+        fwrite(\STDERR, "WARNING: {$name} is UNPINNED: using the local file {$path} (sha256 " . hash_file('sha256', $path) . ").\n");
+
+        return $path;
+    }
+
+    /**
+     * A shell file of the lock, cached by repository and version
+     * (`<cache>/shell/<owner>/<repo>/<version>/<name>`) and re-hashed against the lock on every use.
+     * A cached file that no longer matches is downloaded again; a download that does not match is
+     * an error, and is not kept.
+     */
+    public function fetchLocked(LockedFile $file, string $repository, string $version): string
+    {
+        $dir  = $this->cacheDir . '/shell/' . $repository . '/' . $version;
+        $path = $dir . '/' . $file->name;
+
+        if (is_file($path)) {
+            if (hash_file('sha256', $path) === $file->sha256) {
+                return $path;
+            }
+
+            @unlink($path);
+        }
+
+        if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
+            throw new PackagerException("Cannot create the cache directory {$dir}.");
+        }
+
+        $partial = self::partial($path);
+        $this->download($file->url, $partial);
+        $actual = hash_file('sha256', $partial);
+
+        if ($actual !== $file->sha256) {
+            @unlink($partial);
+
+            throw new PackagerException(
+                "{$file->name} ({$repository} {$version}) does not match the lock.\n  URL:      {$file->url}\n  expected: {$file->sha256}\n  got:      {$actual}"
+            );
+        }
+
+        rename($partial, $path);
+        chmod($path, 0o755);
+
+        return $path;
+    }
+
+    /** A download's temporary name: its own per process, so concurrent builds sharing the cache never meet. */
+    private static function partial(string $path): string
+    {
+        return $path . '.' . getmypid() . '-' . bin2hex(random_bytes(4)) . '.part';
     }
 
     /**
