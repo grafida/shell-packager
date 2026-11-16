@@ -117,6 +117,7 @@ final class ShellLockTest extends TestCase
         // A release the constraint does not allow, or a tag that is not the version's, with URLs to match.
         $tampered['a version outside the constraint'] = static fn (string $j): string => self::githubLock('0.3.0', '0.3.0')->toJson();
         $tampered['a tag that is not the version']    = static fn (string $j): string => self::githubLock('0.4.2', '0.4.1')->toJson();
+        $tampered['a pre-release ^0.4 does not allow'] = static fn (string $j): string => self::githubLock('0.4.3-beta1', '0.4.3-beta1')->toJson();
         self::githubLock('0.4.1', 'v0.4.1')->verify($shell, 'x.lock');
 
         foreach ($tampered as $what => $edit) {

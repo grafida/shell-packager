@@ -11,7 +11,6 @@ declare(strict_types=1);
 
 namespace Grafida\ShellPackager\Shell;
 
-use Composer\Semver\Semver;
 use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
@@ -214,7 +213,7 @@ final readonly class ShellLock
             throw $fail("its repository is {$this->repository}, shell.repository is {$shell->repository}");
         }
 
-        if ($this->constraint !== $shell->constraint || !Semver::satisfies($this->version, $shell->constraint)) {
+        if ($this->constraint !== $shell->constraint || !Resolver::allows($shell->constraint, $this->version)) {
             throw $fail("its version {$this->version} is not one shell.version '{$shell->constraint}' allows");
         }
 

@@ -84,9 +84,8 @@ final class Resolver
             }
 
             $versions[$version] ??= $release;
-            $stability = VersionParser::parseStability($version);
 
-            if (self::ORDER[$stability] <= self::ORDER[$minimum] && Semver::satisfies($version, $shell->constraint)) {
+            if (self::allows($shell->constraint, $version)) {
                 $matching[$version] ??= $release;
             }
         }
@@ -120,6 +119,21 @@ final class Resolver
         }
 
         return new ShellLock($shell->contentHash(), $shell->repository, $shell->constraint, $version, $release->tag, $files);
+    }
+
+    /**
+     * Whether $constraint takes $version: it satisfies the constraint and is at least as stable
+     * as the constraint allows. The one test for both resolving and a lock read back.
+     */
+    public static function allows(string $constraint, string $version): bool
+    {
+        try {
+            $stability = VersionParser::parseStability($version);
+
+            return self::ORDER[$stability] <= self::ORDER[self::minimumStability($constraint)] && Semver::satisfies($version, $constraint);
+        } catch (\UnexpectedValueException) {
+            return false;
+        }
     }
 
     /** The version a release tag stands for: the tag without a leading `v`. */
