@@ -190,7 +190,7 @@ renamed into place, as now. The existing hash-keyed cache for `url` + `sha256` r
 
 ## Text that has to change with it
 
-- `CLAUDE.md`: the rule "Every downloaded binary is pinned and verified by SHA-256 before use" (shell files are
+- `AGENTS.md`: the rule "Every downloaded binary is pinned and verified by SHA-256 before use" (shell files are
   now verified against the lock's hashes, which come from GitHub's digest), and the fixture paragraph ("pins the
   **real** shell and SFX releases").
 - `Runtime.php`'s docblock ("a hash published beside the download is never consulted") applies only to
