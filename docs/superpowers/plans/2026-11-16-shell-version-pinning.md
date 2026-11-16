@@ -393,12 +393,16 @@ Expected: two hashes. Both go in this task's commit message, since Task 6 compar
     `url` + `sha256` or `{"latest": true}`.
   - The fixture paragraph: the shell comes from `shell.version` + the lock, and the SFX keeps real pins.
   - The `runtimes` paragraph: shell and launcher are no longer there.
-- [ ] **Step 3: Add the CHANGELOG lines** to the 0.6.0 section, in this order:
-  - `! The shell and launcher are pinned by version (`shell.version`, Composer syntax) in a committed `shell-package.lock``
-  - `+ `shell-packager update` resolves `shell.version` against the GitHub releases and rewrites the lock`
-  - `+ `shell.local` lets local files stand in for any shell or launcher file, announced as UNPINNED`
-  - `+ `shell.repository` and `shell.assets` for a fork of the shell that publishes elsewhere or under other names`
-  - `~ `runtimes.*.shell` and `runtimes.*.launcher` pins are refused, with how to move to the `shell` block`
+- [ ] **Step 3: Add the CHANGELOG lines** to the 0.6.0 section, placed by prefix among the existing entries (`!`
+  first, then `+`, then `~`):
+
+```text
+! The shell and launcher are pinned by version (`shell.version`, Composer syntax) in a committed `shell-package.lock`
++ `shell-packager update` resolves `shell.version` against the GitHub releases and rewrites the lock
++ `shell.local` lets local files stand in for any shell or launcher file, announced as UNPINNED
++ `shell.repository` and `shell.assets` for a fork of the shell that publishes elsewhere or under other names
+~ `runtimes.*.shell` and `runtimes.*.launcher` pins are refused, with how to move to the `shell` block
+```
 - [ ] **Step 4:** Run `composer test && composer linter:check`. Expected: PASS.
 - [ ] **Step 5: Commit** (`AGENTS.md, CHANGELOG: the shell is pinned by version`), with the before/after hashes in
   the message.
