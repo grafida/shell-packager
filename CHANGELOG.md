@@ -1,3 +1,12 @@
+shell-packager 0.6.0
+================================================================================
++ `linux-appimage` without a host `mksquashfs`: it runs in a Docker image built from a pinned Dockerfile (#1)
++ `linux.appimage.squashfs` (`auto`, `host` or `docker`) and `linux.appimage.docker.image`, pinned by digest
++ `runtimes.linux.appimage-runtime` may be `{"latest": true}`: type2-runtime's newest (`continuous`) build, with a warning
+~ The README links to the user documentation in grafida/shell instead of repeating it
+# [LOW] An AppImage built on a Mac was not byte-identical to one built on Linux (the mode of `.DirIcon`)
+# [LOW] `shell-packager version` said 0.4.0 in 0.5.0 and 0.5.1
+
 shell-packager 0.5.1
 ================================================================================
 # [MEDIUM] `linux-appimage` failed with squashfs-tools 4.5 (Ubuntu 22.04): it has no `-repro-time`

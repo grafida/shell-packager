@@ -76,6 +76,7 @@ final class RuntimeTest extends TestCase
 
         self::assertSame('https://github.com/grafida/phpmicro/releases/download/sfx-latest/linux-aarch64.standard.sfx', $sfx->url(Arch::Aarch64));
         self::assertSame('https://github.com/grafida/shell/releases/latest/download/grafida-launcher-linux-x86_64', Runtime::fromArray('launcher', ['latest' => true], 'linux')->url(Arch::X86_64));
+        self::assertSame('https://github.com/AppImage/type2-runtime/releases/latest/download/runtime-aarch64', Runtime::fromArray('appimage-runtime', ['latest' => true], 'linux')->url(Arch::Aarch64));
     }
 
     public function testLatestCannotBeMixedWithAPin(): void

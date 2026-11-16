@@ -15,7 +15,6 @@ use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Config;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\PackagerException;
-use Grafida\ShellPackager\Process;
 
 /**
  * The AppImage (grafida/grafida#87): the static type-2 runtime (an ELF) followed by a squashfs image
@@ -37,8 +36,8 @@ use Grafida\ShellPackager\Process;
  * says so when they are missing.
  *
  * WHY NOT appimagetool: it is a Linux ELF, and the packages are built on a Mac. An AppImage is
- * nothing but `runtime ++ squashfs`, so it is assembled here with Homebrew's `mksquashfs`
- * (formula `squashfs`); the only other thing appimagetool does that matters is writing the update
+ * nothing but `runtime ++ squashfs`, so it is assembled here with `mksquashfs`, on the host or in
+ * a container ({@see Squashfs}); the only other thing appimagetool does that matters is writing the update
  * information into the runtime's `.upd_info` section, which {@see self::embedUpdateInformation()}
  * does. It also fills `.digest_md5`/`.sha256_sig` for signing, which this packager does not use.
  *
@@ -54,30 +53,22 @@ final class AppImage
     /** AppImage type 2 marker at offset 8 of the ELF header (the padding of e_ident). */
     public const MAGIC = "AI\x02";
 
-    /** Fails early, before the expensive parts of a build, when mksquashfs is not installed. */
-    public static function requireTools(): void
-    {
-        if (!Process::exists('mksquashfs')) {
-            throw new PackagerException(
-                "mksquashfs is required to build an AppImage and was not found.\n"
-                . "  macOS: brew install squashfs      Debian/Ubuntu: apt install squashfs-tools"
-            );
-        }
-    }
-
     /**
      * @param array{launcher: string, shell: string, sfx: string} $runtimes paths of verified binaries
      * @param string $runtime the verified type-2 runtime for the target architecture
+     * @param Squashfs|null $squashfs how to make the image; null resolves it from the configuration
      */
-    public static function write(Config $config, array $runtimes, string $runtime, string $payload, string $output, int $mtime, Arch $arch): void
+    public static function write(Config $config, array $runtimes, string $runtime, string $payload, string $output, int $mtime, Arch $arch, ?Squashfs $squashfs = null): void
     {
-        self::requireTools();
+        $options = $config->appImage ?? new AppImageConfig();
+        $squashfs ??= Squashfs::resolve($options, static function (string $line): void {
+            fwrite(\STDERR, $line . "\n");
+        });
 
         if ($config->desktop === null || $config->icons === []) {
             throw new PackagerException('An AppImage needs linux.desktop and at least one linux.icons entry: the desktop entry and the icon live at the root of the AppDir.');
         }
 
-        $options = $config->appImage ?? new AppImageConfig();
         $info    = $options->updateInformation === null ? null : strtr($options->updateInformation, [
             '{name}'    => $config->linuxName,
             '{arch}'    => $arch->value,
@@ -95,28 +86,20 @@ final class AppImage
             $elf = self::embedUpdateInformation($elf, $info);
         }
 
-        $work   = Filesystem::tempDir('appimage');
-        $appDir = $work . '/AppDir';
+        $work = Filesystem::tempDir('appimage');
 
         try {
-            self::stage($config, $runtimes, $payload, $appDir, $mtime);
+            $image = $work . '/image.squashfs';
+            $squashfs->build(self::entries($config, $runtimes, $payload), $image, $mtime, $work);
 
-            $squashfs = $work . '/image.squashfs';
-            // mksquashfs reads SOURCE_DATE_EPOCH itself and then refuses explicit times, so it is unset and the
-            // time (that variable's value, or the build time) is passed explicitly. -repro-time is not used:
-            // squashfs-tools 4.5 (Ubuntu 22.04) does not know it, and these three exist from 4.4 on.
-            Process::mustRun([
-                'env', '-u', 'SOURCE_DATE_EPOCH', 'mksquashfs', $appDir, $squashfs,
-                '-noappend', '-quiet', '-no-progress',
-                '-comp', 'zstd', '-b', '128K',
-                '-all-root', '-no-xattrs', '-root-mode', '0755',
-                '-mkfs-time', (string) $mtime, '-all-time', (string) $mtime, '-root-time', (string) $mtime,
-            ]);
+            if (@file_get_contents($image, length: 4) !== 'hsqs') {
+                throw new PackagerException("mksquashfs ({$squashfs->strategy}) did not write a squashfs image.");
+            }
 
             Filesystem::mkdir(\dirname($output));
             $part = $output . '.part';
             Filesystem::write($part, $elf);
-            $in  = fopen($squashfs, 'rb');
+            $in  = fopen($image, 'rb');
             $out = fopen($part, 'ab');
 
             if ($in === false || $out === false || stream_copy_to_stream($in, $out) === false) {
@@ -250,31 +233,29 @@ final class AppImage
     }
 
     /**
+     * The AppDir, described rather than written ({@see Squashfs} stages it as a directory or streams
+     * it as a tar): directories first, parents before children, then the files.
+     *
      * @param array{launcher: string, shell: string, sfx: string} $runtimes
+     * @return list<AppDirEntry>
      */
-    private static function stage(Config $config, array $runtimes, string $payload, string $dir, int $mtime): void
+    public static function entries(Config $config, array $runtimes, string $payload): array
     {
-        $put = static function (string $name, string $data, int $mode) use ($dir, $mtime): void {
-            Filesystem::write("{$dir}/{$name}", $data);
-            chmod("{$dir}/{$name}", $mode);
-            touch("{$dir}/{$name}", $mtime);
-        };
-
-        Filesystem::mkdir($dir);
-        $put('AppRun', Filesystem::read($runtimes['launcher']), 0o755);
-        $put(LinuxTarball::SHELL_BINARY, Filesystem::read($runtimes['shell']), 0o755);
-        $put($config->workerBinary, Filesystem::read($runtimes['sfx']), 0o755);
-        $put($config->workerBinary . '.phar', Filesystem::read($payload), 0o644);
-        $put('shell.json', Filesystem::read($config->manifestPath), 0o644);
-        $put($config->appId . '.desktop', LinuxTarball::desktopEntry(Filesystem::read((string) $config->desktop), $config), 0o644);
+        $files = [
+            AppDirEntry::file('AppRun', $runtimes['launcher'], 0o755),
+            AppDirEntry::file(LinuxTarball::SHELL_BINARY, $runtimes['shell'], 0o755),
+            AppDirEntry::file($config->workerBinary, $runtimes['sfx'], 0o755),
+            AppDirEntry::file($config->workerBinary . '.phar', $payload, 0o644),
+            AppDirEntry::file('shell.json', $config->manifestPath, 0o644),
+            AppDirEntry::data($config->appId . '.desktop', LinuxTarball::desktopEntry(Filesystem::read((string) $config->desktop), $config), 0o644),
+        ];
 
         // Config sorts the icons by size.
         $icons   = $config->icons;
-        $largest = Filesystem::read((string) end($icons));
-        $put($config->appId . '.png', $largest, 0o644);
+        $files[] = AppDirEntry::file($config->appId . '.png', (string) end($icons), 0o644);
 
         foreach ($config->icons as $size => $icon) {
-            $put("usr/share/icons/hicolor/{$size}x{$size}/apps/{$config->appId}.png", Filesystem::read($icon), 0o644);
+            $files[] = AppDirEntry::file("usr/share/icons/hicolor/{$size}x{$size}/apps/{$config->appId}.png", $icon, 0o644);
         }
 
         foreach ($config->files as $name => $source) {
@@ -282,24 +263,22 @@ final class AppImage
                 throw new PackagerException("linux.files cannot provide '{$name}': the AppImage uses that name itself.");
             }
 
-            $put($name, Filesystem::read($source), 0o644);
+            $files[] = AppDirEntry::file($name, $source, 0o644);
         }
 
-        symlink($config->appId . '.png', "{$dir}/.DirIcon");
+        $files[] = AppDirEntry::symlink('.DirIcon', $config->appId . '.png');
 
-        // Directories: explicit modes (umask-independent), deepest first so a parent's mtime is not moved.
-        $dirs = [$dir];
-        $it   = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST);
+        $dirs = [];
 
-        foreach ($it as $info) {
-            if ($info instanceof \SplFileInfo && $info->isDir() && !$info->isLink()) {
-                $dirs[] = $info->getPathname();
+        foreach ($files as $file) {
+            for ($parent = \dirname($file->name); $parent !== '.'; $parent = \dirname($parent)) {
+                $dirs[$parent] = true;
             }
         }
 
-        foreach (array_reverse($dirs) as $d) {
-            chmod($d, 0o755);
-            touch($d, $mtime);
-        }
+        $dirs = array_map(strval(...), array_keys($dirs));
+        sort($dirs, \SORT_STRING);
+
+        return [...array_map(AppDirEntry::directory(...), $dirs), ...$files];
     }
 }

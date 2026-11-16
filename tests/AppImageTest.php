@@ -15,8 +15,10 @@ use Grafida\ShellPackager\Arch;
 use Grafida\ShellPackager\Filesystem;
 use Grafida\ShellPackager\Linux\AppImage;
 use Grafida\ShellPackager\Linux\AppImageConfig;
+use Grafida\ShellPackager\Linux\Squashfs;
 use Grafida\ShellPackager\PackagerException;
 use Grafida\ShellPackager\Process;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
 use PHPUnit\Framework\TestCase;
 
@@ -90,26 +92,92 @@ final class AppImageTest extends TestCase
         }
     }
 
-    public function testAMissingMksquashfsIsReportedClearly(): void
-    {
-        $path = getenv('PATH');
-        putenv('PATH=' . $this->dir);
-
-        try {
-            $this->expectException(PackagerException::class);
-            $this->expectExceptionMessage('mksquashfs is required');
-            AppImage::requireTools();
-        } finally {
-            putenv('PATH=' . $path);
-        }
-    }
-
-    public function testTheLayoutAndTheContainer(): void
+    /**
+     * The docker strategy's input and output, without Docker: a fake `docker` drops everything up to
+     * the image's `sh` and runs the rest here, so the host's mksquashfs reads the AppDir as a tar on
+     * stdin and the image comes back on stdout, exactly as in the container. Same mksquashfs, same
+     * options: the bytes must be the host strategy's.
+     */
+    public function testTheDockerRouteGivesTheHostStrategysBytes(): void
     {
         $this->needTools();
+
+        if (!Squashfs::host()->tar) {
+            self::markTestSkipped('This mksquashfs is older than 4.6 and reads no tar.');
+        }
+
         $runtime = $this->dir . '/runtime';
         Filesystem::write($runtime, ElfBuilder::runtime());
-        $out = $this->build($runtime, $this->dir . '/dist/test.AppImage');
+        Filesystem::mkdir($this->dir . '/bin');
+        Filesystem::write($this->dir . '/bin/docker', "#!/bin/sh\nwhile [ \"\$1\" != sh ]; do shift; done\nexec \"\$@\"\n");
+        chmod($this->dir . '/bin/docker', 0o755);
+        $path = (string) getenv('PATH');
+        putenv("PATH={$this->dir}/bin:{$path}");
+
+        try {
+            $tar = $this->build($runtime, $this->dir . '/tar.AppImage', Squashfs::docker('fake'));
+        } finally {
+            putenv("PATH={$path}");
+        }
+
+        $host = $this->build($runtime, $this->dir . '/host.AppImage');
+        self::assertSame(hash_file('sha256', $host), hash_file('sha256', $tar));
+    }
+
+    /**
+     * The real thing, when SHELL_PACKAGER_TEST_DOCKER is set and a daemon answers: the image the
+     * packager builds from its Dockerfile, and the same bytes as a host mksquashfs of the same
+     * version (Homebrew's when the Dockerfile was pinned).
+     */
+    public function testTheDockerStrategy(): void
+    {
+        if (getenv('SHELL_PACKAGER_TEST_DOCKER') === false) {
+            self::markTestSkipped('SHELL_PACKAGER_TEST_DOCKER runs mksquashfs in the packager\'s Docker image.');
+        }
+
+        $said     = [];
+        $squashfs = Squashfs::resolve(new AppImageConfig(squashfs: 'docker'), static function (string $line) use (&$said): void {
+            $said[] = $line;
+        });
+        $runtime  = $this->dir . '/runtime';
+        Filesystem::write($runtime, ElfBuilder::runtime());
+        $docker = $this->build($runtime, $this->dir . '/docker.AppImage', $squashfs);
+        $offset = \strlen(ElfBuilder::runtime());
+        self::assertSame('hsqs', substr(Filesystem::read($docker), $offset, 4));
+
+        if (!Process::exists('mksquashfs')) {
+            return;
+        }
+
+        $hostVersion = explode("\n", trim(Process::run(['mksquashfs', '-version'])[1]))[0];
+
+        if (!str_contains((string) end($said), $hostVersion)) {
+            self::markTestIncomplete("The image's mksquashfs is not the host's ({$hostVersion}), so the bytes may differ.");
+        }
+
+        $listing = Process::mustRun(['unsquashfs', '-o', (string) $offset, '-ll', $docker]);
+        self::assertMatchesRegularExpression('#^-rwxr-xr-x root/\S+ .* squashfs-root/AppRun$#m', $listing);
+        self::assertSame(hash_file('sha256', $this->build($runtime, $this->dir . '/host.AppImage')), hash_file('sha256', $docker));
+    }
+
+    /** @return array<string, array{bool}> */
+    public static function routes(): array
+    {
+        return ['a tar on stdin (4.6+)' => [true], 'a staged directory (4.4, 4.5)' => [false]];
+    }
+
+    #[DataProvider('routes')]
+    public function testTheLayoutAndTheContainer(bool $tar): void
+    {
+        $this->needTools();
+
+        if ($tar && !Squashfs::host()->tar) {
+            self::markTestSkipped('This mksquashfs is older than 4.6 and reads no tar.');
+        }
+
+        $runtime = $this->dir . '/runtime';
+        Filesystem::write($runtime, ElfBuilder::runtime());
+        $out = $this->build($runtime, $this->dir . '/dist/test.AppImage', Squashfs::host($tar));
         $bytes = Filesystem::read($out);
 
         // An ELF runtime with the AppImage type-2 marker, then the squashfs at the runtime's end.
@@ -180,7 +248,7 @@ final class AppImageTest extends TestCase
         self::assertSame(hash_file('sha256', $a), hash_file('sha256', $b));
 
         $config = Fixture::config(linux: ['appimage' => []]);
-        AppImage::write($config, $this->binaries(), $runtime, "{$this->dir}/payload", $this->dir . '/c.AppImage', 1700000000, Arch::Aarch64);
+        AppImage::write($config, $this->binaries(), $runtime, "{$this->dir}/payload", $this->dir . '/c.AppImage', 1700000000, Arch::Aarch64, Squashfs::host());
         self::assertNull(AppImage::readUpdateInformation(Filesystem::read($this->dir . '/c.AppImage')));
     }
 
@@ -218,10 +286,10 @@ final class AppImageTest extends TestCase
         return ['launcher' => "{$this->dir}/launcher", 'shell' => "{$this->dir}/shell", 'sfx' => "{$this->dir}/sfx"];
     }
 
-    private function build(string $runtime, string $out): string
+    private function build(string $runtime, string $out, ?Squashfs $squashfs = null): string
     {
         $config = Fixture::config();
-        AppImage::write($config, $this->binaries(), $runtime, "{$this->dir}/payload", $out, 1700000000, Arch::Aarch64);
+        AppImage::write($config, $this->binaries(), $runtime, "{$this->dir}/payload", $out, 1700000000, Arch::Aarch64, $squashfs ?? Squashfs::host());
 
         return $out;
     }

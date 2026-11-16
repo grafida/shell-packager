@@ -55,6 +55,30 @@ final class Process
         return $out;
     }
 
+    /**
+     * Runs $command with stdin read from $stdinFile and stdout written to $stdoutFile, so neither
+     * passes through memory (an AppImage's squashfs is tens of megabytes). Only stderr is a pipe,
+     * so there is nothing to deadlock on. A non-zero exit is an error naming the command.
+     *
+     * @param list<string> $command
+     */
+    public static function mustRunFiles(array $command, string $stdinFile, string $stdoutFile): void
+    {
+        $process = proc_open($command, [0 => ['file', $stdinFile, 'rb'], 1 => ['file', $stdoutFile, 'wb'], 2 => ['pipe', 'w']], $pipes);
+
+        if (!\is_resource($process)) {
+            throw new PackagerException('Cannot run ' . $command[0] . '.');
+        }
+
+        $err  = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+        $code = proc_close($process);
+
+        if ($code !== 0) {
+            throw new PackagerException(implode(' ', array_map(self::quote(...), $command)) . " failed ({$code}):\n" . trim($err));
+        }
+    }
+
     public static function exists(string $tool): bool
     {
         [$code] = \PHP_OS_FAMILY === 'Windows'

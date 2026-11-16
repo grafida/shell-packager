@@ -2,274 +2,44 @@
 
 Build and packaging tooling for applications built on the
 [Grafida desktop shell](https://github.com/grafida/shell): it turns an app (a PHP worker and its
-`shell.json` manifest) into a package with the prebuilt shell and the
-[phpmicro](https://github.com/grafida/phpmicro) `sibling-phar` worker runtime. It was extracted from
-[Grafida](https://github.com/grafida/grafida)'s own build scripts, and it knows nothing about any
-one app's layout: everything app-specific comes from the app's configuration and manifest.
+`shell.json` manifest) into installable packages for Linux, macOS and Windows, with the prebuilt shell and the
+[phpmicro](https://github.com/grafida/phpmicro) worker runtime. It knows nothing about any one app's layout: everything
+app-specific comes from the app's configuration and manifest.
 
-> [!TIP]
-> **Start with the user documentation:** [Packaging](https://github.com/grafida/shell/blob/main/docs/user/packaging.md) covers the configuration, the pinned runtimes,
-> building for each platform, unsigned builds and signing credentials, and
-> [Getting signing certificates](https://github.com/grafida/shell/blob/main/docs/user/code-signing.md) explains how to obtain them. This README keeps the
-> packager-specific reference: command line, the layout of each package and what the packager checks.
+## Documentation
 
-## Use
+All user documentation lives in [grafida/shell](https://github.com/grafida/shell/blob/main/docs/user/README.md).
+For this package:
 
-```sh
-composer require --dev grafida/shell-packager
+- [Packaging](https://github.com/grafida/shell/blob/main/docs/user/packaging.md): installing the packager, which
+  machine builds what, the configuration file, the pinned runtimes, and every command.
+- [Linux packages](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#linux): the tarball, `.deb` and
+  `.rpm`, the AppImage and the Arch `PKGBUILD`.
+- [macOS](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#macos) and
+  [Windows](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#windows) packages.
+- [What the packager checks](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#the-packaged-worker-is-tested-before-it-is-written)
+  before it writes a package.
+- [Unsigned builds](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#unsigned-builds),
+  [signing credentials](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#providing-signing-credentials)
+  and [getting signing certificates](https://github.com/grafida/shell/blob/main/docs/user/code-signing.md).
 
-vendor/bin/shell-packager linux-tarball --config=shell-package.json --arch=x86_64 --app-version=1.0.0
-vendor/bin/shell-packager linux-appimage --config=shell-package.json --arch=x86_64 --app-version=1.0.0
-vendor/bin/shell-packager linux-pkgbuild --config=shell-package.json --app-version=1.0.0
-vendor/bin/shell-packager macos-app --config=shell-package.json --app-version=1.0.0
-vendor/bin/shell-packager macos-dmg --config=shell-package.json --app-version=1.0.0
-vendor/bin/shell-packager windows-tree --config=shell-package.json --app-version=1.0.0
-vendor/bin/shell-packager windows-installer --config=shell-package.json --app-version=1.0.0
-vendor/bin/shell-packager phar  --config=shell-package.json --output=build/app-worker.phar
-vendor/bin/shell-packager linux-deb --config=shell-package.json --arch=x86_64 --app-version=1.0.0
-vendor/bin/shell-packager linux-rpm --config=shell-package.json --arch=aarch64 --app-version=1.0.0
-vendor/bin/shell-packager fetch --config=shell-package.json --arch=aarch64 [--platform=linux|macos|windows]
-```
+`vendor/bin/shell-packager help` lists the commands and options.
 
-`SOURCE_DATE_EPOCH` fixes every timestamp. With the same inputs, the PHAR and the Linux tarball are
-then byte-identical (the macOS bundle and image are not: `codesign` and `hdiutil` are not). Downloads are cached by SHA-256 in `SHELL_PACKAGER_CACHE` (default
-`$XDG_CACHE_HOME/grafida-shell-packager`).
+## Development
 
-## The configuration
-
-The configuration is a JSON file in the app, conventionally `shell-package.json`; paths in it are relative to it. Its
-members (`phar`, `runtimes`, `linux`, `macos`, `windows`), the pinned and `latest` runtimes, and `--local` are
-documented in [Packaging](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#the-configuration-file-shell-packagejson). The package is named after the
-app's manifest, so the shell and the package cannot disagree: `id` names the desktop entry and icons (and is the
-window's Wayland `app_id`), `title` appears in the alerts, and `worker.binary` names the SFX stub and its `.phar`.
-
-Two implementation details: `phar.ini` becomes phpmicro's extra-INI block (`fd f6 69 e6`, a
-big-endian length, the ini text) at the front of the `.phar` file, and a flat `runtimes` (the names straight under it)
-still means Linux, while a mix of the flat and the per-platform shape is an error.
-
-## What is checked before a package is written
-
-The packaged worker is run before a package is written; see
-[the packaged worker is tested](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#the-packaged-worker-is-tested-before-it-is-written). In detail:
-
-On a machine of the target's OS and architecture (Linux, a Mac, or Windows x86_64; an x86_64 macOS
-worker also on an arm64 Mac with Rosetta 2, translated), the packaged worker is run:
-
-- **an ini probe:** the same block, on the same SFX, must read back every setting. phpmicro
-  silently ignores a malformed block.
-- **a handshake:** the payload on the SFX must send protocol v1's `ready` frame and exit when its
-  stdin closes. Every shell worker speaks the protocol, so this holds for any app.
-
-Both run with every per-user directory pointed at a temporary directory. On macOS the handshake runs
-on the **signed** stub inside the finished bundle, so it also proves the stub finds its payload in
-`../Resources` and runs under the hardened runtime with the entitlements it was given. On Windows it
-runs on the signed stub in the finished tree, its resources rewritten and its signature appended.
-Elsewhere (a Windows package built on the Mac, an x86_64 bundle on an arm64 Mac without Rosetta 2)
-it is skipped with a note, never faked.
-
-## The Linux tarball
-
-```
-myapp/
-  myapp                  the launcher (static): checks the system libraries, alerts, execs the shell
-  grafida-shell          the shell
-  myapp-worker           the phpmicro SFX stub
-  myapp-worker.phar      the worker payload (extra-INI block + PHAR)
-  shell.json
-  <id>.desktop           Exec, Icon and StartupWMClass forced to agree with the package
-  icons/hicolor/<n>x<n>/apps/<id>.png
-  install.sh             ./install.sh installs the desktop entry and icons for the current user
-  …                      linux.files
-```
-
-`linux.replaces` lists the desktop ids of an earlier build of the app installed under another id
-(`["myapp"]` for an app whose old packaging used `myapp.desktop`). Installing removes each one's
-`~/.local/share/applications/<id>.desktop` and its hicolor icons, but only when the entry exists and
-its `Exec` (field codes dropped, quotes removed) ends in `/<linux.name>`; an entry with that id that
-starts anything else is left alone, and `install.sh` says so. `--uninstall` removes only this
-build's own entry and icons.
-
-## The Linux `.deb` and `.rpm`
-
-`linux-deb` and `linux-rpm` (`--arch`, `--app-version`, `--output` as for the tarball) write the same
-files as the tarball with a pinned [nfpm](https://nfpm.goreleaser.com) 2.49.0:
-
-```
-/opt/myapp/                      myapp, grafida-shell, myapp-worker, myapp-worker.phar, shell.json, linux.files
-/usr/bin/myapp                   symlink to /opt/myapp/myapp (the launcher resolves its real path)
-/usr/share/applications/<id>.desktop              Exec=myapp (on the PATH), Icon and StartupWMClass = the id
-/usr/share/icons/hicolor/<n>x<n>/apps/<id>.png
-```
-
-There is no `install.sh`: the package manager installs, upgrades and removes. WebKitGTK and GTK are
-dependencies, never bundled, and since they are the *shell's* needs they are the packager's defaults, not
-the app's: `.deb` `libwebkit2gtk-4.1-0`, `libgtk-3-0`; `.rpm` `webkit2gtk4.1`, `gtk3`. Architectures are
-`amd64`/`arm64` (`.deb`) and `x86_64`/`aarch64` (`.rpm`). A hyphen in `--app-version` becomes `~`
-(`0.5-rc1` is packaged as `0.5~rc1`, which sorts before `0.5`).
-
-The package metadata is the app's, under `linux.package`:
-
-```jsonc
-"package": {
-  "maintainer": "Jane Doe <jane@example.com>",     // required
-  "license": "GPL-3.0-or-later",                   // required
-  "homepage": "https://example.com",
-  "description": "One paragraph.",                  // default: the manifest title
-  "section": "utils",                               // .deb only
-  "depends": {"deb": ["xdg-utils"], "rpm": ["xdg-utils"]},   // added to the shell's
-  "output": {"deb": "build/dist/{name}-{version}-linux-{debarch}.deb", "rpm": "build/dist/{name}-{version}-linux-{arch}.rpm"}
-}
-```
-
-`linux.name` must be a valid package name (lower case letters, digits, `.` `+` `-`), and no field may
-contain a `$` (nfpm expands environment variables in its configuration). Each package gets a `.sha256`.
-
-Maintainer scripts (POSIX `sh`, from `resources/linux/`), identical for both formats:
-
-- **post-install** refreshes the desktop-entry and hicolor icon caches when their tools exist, and honours
-  `linux.replaces` for *system-wide* entries only: `/usr/share/applications/<old>.desktop` and its icons are
-  removed when its `Exec` is `<linux.name>` or ends in `/<linux.name>`. It never reads or writes a home
-  directory: a per-user entry from the tarball's `install.sh` is the user's to remove (`./install.sh
-  --uninstall`).
-- **post-removal** refreshes the caches and, on a final removal only (`remove`/`purge`, or an RPM's last
-  instance; never an upgrade), deletes `/opt/<name>` with whatever the app wrote there. User data lives in
-  the user's home and is never touched.
-
-⚠️ A relative `logDir` in the manifest lands beside the shell (the fixture's does), which users cannot
-write under `/opt`; check what an app installed this way writes where.
-
-nfpm is pinned in the packager (`Linux\Nfpm`), not in the app: one archive per build host (macOS or Linux,
-x86_64 or aarch64), each with the SHA-256 of the bytes downloaded from the release, verified like every
-other binary. `fetch --nfpm` fetches it; `--local nfpm=PATH` uses an unpinned binary (announced). The
-packages are not signed. An unsigned `.rpm` needs `--nogpgcheck` (dnf) or `--nosignature` (rpm).
-
-⚠️ **The SFX stub and its `.phar` are two files and must stay two.** A stub with the payload
-appended cannot be code-signed: the signature lands past the PHAR and corrupts it. Linux does not
-sign, but the same layout serves macOS and Windows.
-
-## The AppImage
-
-```
-AppRun                 the launcher (static); the type-2 runtime execs it
-grafida-shell          the shell
-myapp-worker, .phar    the phpmicro SFX stub and its payload (still two files)
-shell.json
-<id>.desktop           as in the tarball: Exec, Icon and StartupWMClass forced
-<id>.png               the largest linux.icons entry, at the root as the AppImage spec wants
-.DirIcon -> <id>.png
-usr/share/icons/hicolor/<n>x<n>/apps/<id>.png
-…                      linux.files
-```
-
-An AppImage is the pinned **static type-2 runtime** (`runtimes.linux.appimage-runtime`, one URL and SHA-256 per
-architecture, taken from the downloaded bytes of a release of
-[AppImage/type2-runtime](https://github.com/AppImage/type2-runtime)) followed by a squashfs image of that
-directory. The static runtime needs no `libfuse2`, which Ubuntu 22.04 lacks. WebKitGTK and GTK are **never bundled**:
-the AppImage uses the system's, and the launcher's alert says what is missing.
-
-- **`mksquashfs` is required** (Homebrew `squashfs`, apt `squashfs-tools`); the packager stops with a message
-  before downloading anything when it is missing. `appimagetool` is not used: it is a Linux ELF and the packages are
-  built on a Mac, and all it adds to `runtime ++ squashfs` is the update information (done here) and the signature
-  digests (not used).
-- The image is zstd-compressed (the pinned runtime is built with zstd and zlib), owned by root, without extended
-  attributes, with every timestamp the build time and entries sorted by `mksquashfs`: with the same
-  `SOURCE_DATE_EPOCH` the AppImage is byte-identical on any host.
-- **Update information** (`linux.appimage.updateInformation`, e.g.
-  `gh-releases-zsync|user|repo|latest|myapp-*-linux-{debarch}.AppImage.zsync`; `{name}`, `{arch}`, `{debarch}` are
-  expanded) is written into the runtime's `.upd_info` section, found by name in the ELF section headers, NUL-padded
-  to its 1024 bytes. It is only embedded: no updater is installed, and the `.zsync` file is not made.
-- `--output`, or `linux.appimage.output` (`{name}`, `{version}`, `{arch}`, `{debarch}`); a `.sha256` is written beside it.
-  The worker check runs as for the tarball.
-
-## The Arch PKGBUILD
-
-`linux-pkgbuild --app-version=V [--arch=ARCH]… [--output=FILE]` writes a `PKGBUILD` for the tarballs `linux-tarball`
-already built (without `--arch`, whichever of the two exist; with it, each must). The `source_<arch>` URL comes from
-`linux.pkgbuild.source` (where *you* publish the tarball; `{name}`, `{version}`, `{arch}`, `{debarch}`), the
-`sha256sums_<arch>` from the tarball files. The package depends on `webkit2gtk-4.1`, `gtk3`, `hicolor-icon-theme` and
-`dbus` plus `linux.pkgbuild.depends`; installs the tarball under `/opt/<name>` (without `install.sh` and the icon
-folder) with `/usr/bin/<name>` linked to the launcher, the desktop entry in `/usr/share/applications` and the icons in
-the hicolor theme; and sets `!strip !debug`, so makepkg leaves the static launcher, the shell and the SFX stub alone. A
-version like `1.0.0-rc1` is `1.0.0_rc1` for pacman. Nothing is published to the AUR. `linux.pkgbuild` takes `source`,
-`description`, `url`, `license` (SPDX list; **required**), `maintainer`, `depends`, `optdepends`, `pkgrel` and `output`.
-A licence outside Arch's common ones needs its text in `/usr/share/licenses/<name>/`: add it to `linux.files`
-and extend the file by hand, or use a common identifier.
-
-## The macOS bundle and image
-
-```
-MyApp.app/Contents/
-  Info.plist              generated (below)
-  MacOS/MyApp             the shell (CFBundleExecutable)
-  MacOS/myapp-worker      the phpmicro SFX stub
-  Resources/myapp-worker.phar   the worker payload (extra-INI block + PHAR)
-  Resources/shell.json
-  Resources/MyApp.icns    macos.icon
-  Resources/…             macos.resources
-```
-
-- **One architecture per bundle**, `--arch=aarch64` (the default) or `--arch=x86_64` for Intel Macs.
-  Both binaries must be thin Mach-O files of that architecture whose minimum macOS (read from
-  `LC_BUILD_VERSION`) is within the bundle's `LSMinimumSystemVersion`, 12.0: an `Info.plist` must
-  never offer the app to a Mac it cannot run on. `{arch}` (aarch64/x86_64) and `{debarch}`
-  (arm64/amd64) in `macos.app` and `macos.output` name each architecture's bundle and image, and
-  `macos-dmg --app=` refuses a bundle whose binaries are not of `--arch`.
-- **`Info.plist`** is generated. The packager computes the identifier (the manifest `id`), the
-  names (`title`, `macos.name`), the version (`--app-version`, one to three integers), the icon
-  and `LSMinimumSystemVersion`. Everything else comes from `macos.infoPlist`; a computed key there is
-  an error.
-- **The stub must be bare.** A stub with its PHAR still appended is refused: signing it would seal
-  past the PHAR and corrupt it.
-- **Signing** is described in [Unsigned builds](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#unsigned-builds) and
-  [Providing signing credentials](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#providing-signing-credentials). It goes inside out (the stub, the
-  shell, the bundle), always with the **hardened runtime**, so an ad-hoc build runs under the same restrictions as the
-  notarised one. Each binary gets `macos.entitlements.<shell|worker>`, or none. The signatures are then verified
-  (`codesign --verify --strict`) and read back: the hardened runtime on each binary, and exactly the configured
-  entitlements.
-- **The image** holds the bundle and an `/Applications` link. Finder lays it out (`macos.dmg`) through
-  AppleScript, best-effort: it needs Finder's Automation permission, runs under a time limit, and
-  styles only a volume mounted at exactly `/Volumes/<name>`; otherwise the image stays plain, with a
-  warning. `--no-style` skips it (a CI runner has no Finder to drive). The volume icon is written
-  after the layout. The image is UDZO, signed with the Developer ID when there is one.
-- **Notarisation** runs when `MACOS_NOTARY_PROFILE` names a `notarytool` keychain profile (it needs
-  the identity too): submit and wait, staple, validate, and `spctl` on the image.
-
-## The Windows tree and installer
-
-```
-MyApp/
-  MyApp.exe              the shell, with windows.icon and a version resource
-  myapp-worker.exe       the phpmicro SFX stub, likewise
-  myapp-worker.phar      the worker payload (extra-INI block + PHAR)
-  shell.json
-  MyApp.ico              windows.icon, for shortcuts and Add/Remove Programs
-  …                      windows.files
-```
-
-- **x86_64 only**, and both executables must be GUI-subsystem (a console one would open a window),
-  bare (nothing appended: the stub's PHAR stays a sibling file) and unsigned (the packager writes
-  their resources first).
-- **Icon and version resources are written in PHP** on any host (no `rcedit`). The executable's
-  `.rsrc` section is rebuilt in place, keeping the application manifest, and the `.reloc` section
-  behind it moves up; the image size and checksum follow. `FileDescription` is what Task Manager
-  names the process by: `windows.version.shellDescription` (default: the name) and
-  `workerDescription` (default: "<name> worker"). The four-part version comes from `--app-version`:
-  major.minor.patch, then 1000 for a release, or 0–9 / 10–100 / 900–999 for alpha / beta / rc N, so
-  a pre-release sorts below its release.
-- **Signing** (Azure Trusted Signing or a keystore, through Jsign, or nothing) and `--no-sign` are described in
-  [Providing signing credentials](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#providing-signing-credentials) and
-  [Unsigned builds](https://github.com/grafida/shell/blob/main/docs/user/packaging.md#unsigned-builds). Each signature is checked with `osslsigncode`: the signed digest
-  must match the file; the chain only when `WINDOWS_SIGN_CAFILE` names its roots. A file with anything appended past
-  its image is never signed (an installer is the one exception).
-- **The installer is the app's own NSIS script** (`windows.installer.script`), compiled by
-  `makensis` 3.08 or later, which runs on macOS and Linux. It gets the tree and the documented
-  defines (`SRCDIR`, `OUTFILE`, `APPNAME`, `APPID`, `APPEXE`, `WORKEREXE`, `WORKERPHAR`, `ICONFILE`,
-  `APPVERSION`, `VIVERSION`, `PUBLISHER`; see `src/Windows/WindowsInstaller.php`) plus
-  `windows.installer.defines`. When signing, it also gets `SHELL_PACKAGER_SIGN`, and **must** sign its
-  uninstaller with it (`!uninstfinalize '${SHELL_PACKAGER_SIGN}' = 0`), since the uninstaller is
-  written inside the installer and nothing can reach it later; a script that does not is refused,
-  and one that signs nothing fails the build. Then the installer itself is signed.
-  `tests/fixtures/app/installer.nsi` is a complete example.
+- `composer test` runs the unit suite; `composer linter:check` runs PHPStan (level max, strict rules). Scripts in
+  `scripts/` and `resources/` must pass `shellcheck`.
+- Tests that need real binaries or tools are skipped unless these are set:
+  - `SHELL_PACKAGER_TEST_APPIMAGE_RUNTIME`: the pinned type-2 runtime (`fetch --platform=linux`).
+  - `SHELL_PACKAGER_TEST_DOCKER`: build an AppImage's squashfs in the packager's Docker image, and compare it with
+    the host's `mksquashfs`.
+  - `SHELL_PACKAGER_TEST_NFPM`: an nfpm binary, to build and read back `.deb` and `.rpm` packages (`fetch --nfpm`).
+  - `SHELL_PACKAGER_TEST_SFX` (Linux), `SHELL_PACKAGER_TEST_MACOS_SHELL`, `_SFX` (with `_ARCH`, default aarch64) and
+    `SHELL_PACKAGER_TEST_WINDOWS_SHELL`, `_SFX`: the pinned shells and SFX stubs (`fetch --platform=…`), for the
+    worker check, signing and the bundles.
+- `scripts/e2e-linux.sh`, `scripts/e2e-macos.sh` and `scripts/e2e-windows.sh` package the fixture app
+  (`tests/fixtures/app`), install it and run it on a real machine. CI does not run them.
+- `CHANGELOG.md` gets one terse line per change.
 
 ## Licence
 

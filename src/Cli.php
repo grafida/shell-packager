@@ -13,9 +13,11 @@ namespace Grafida\ShellPackager;
 
 use Grafida\ShellPackager\Linux\LinuxPackage;
 use Grafida\ShellPackager\Linux\AppImage;
+use Grafida\ShellPackager\Linux\AppImageConfig;
 use Grafida\ShellPackager\Linux\LinuxTarball;
 use Grafida\ShellPackager\Linux\Nfpm;
 use Grafida\ShellPackager\Linux\Pkgbuild;
+use Grafida\ShellPackager\Linux\Squashfs;
 use Grafida\ShellPackager\Macos\Codesign;
 use Grafida\ShellPackager\Macos\MacApp;
 use Grafida\ShellPackager\Macos\MacDmg;
@@ -29,10 +31,11 @@ use Grafida\ShellPackager\Windows\WindowsTree;
 /** `bin/shell-packager`: argument parsing and the commands. */
 final class Cli
 {
-    public const VERSION = '0.4.0';
+    public const VERSION = '0.6.0';
 
     public const USAGE = <<<'TXT'
-        shell-packager 0.4.0: packaging for apps on the Grafida desktop shell
+        shell-packager 0.6.0: packaging for apps on the Grafida desktop shell
+        Documentation: https://github.com/grafida/shell/blob/main/docs/user/packaging.md
 
         Usage:
           shell-packager linux-tarball --config=FILE --arch=ARCH --app-version=VERSION [options]
@@ -85,6 +88,9 @@ final class Cli
 
         linux-deb and linux-rpm write the package with a pinned nfpm (macOS or Linux build host), from the
         same file list as the tarball, under /opt/<linux.name>; they need linux.package (maintainer, license).
+
+        linux-appimage needs mksquashfs: the host's (squashfs-tools), or one in a Docker container the
+        packager builds once from its own pinned Dockerfile (linux.appimage.squashfs: auto, host, docker).
 
         Timestamps come from SOURCE_DATE_EPOCH when it is set (Linux output is byte-reproducible;
         macOS output is not). Downloads are cached by SHA-256 in SHELL_PACKAGER_CACHE (default:
@@ -204,11 +210,10 @@ final class Cli
     /** @param array<string, list<string>> $options */
     private static function linuxAppImage(array $options): int
     {
-        // Before the downloads and the PHAR: a missing mksquashfs should cost nothing.
-        AppImage::requireTools();
-
         $config  = Config::load(self::one($options, 'config'));
         $arch    = Arch::parse(self::one($options, 'arch'));
+        // Before the downloads and the PHAR: a missing mksquashfs (or Docker) should cost nothing.
+        $squashfs = Squashfs::resolve($config->appImage ?? new AppImageConfig(), self::log(...));
         $version = self::one($options, 'app-version');
         $mtime   = self::timestamp();
         $output  = isset($options['output']) ? self::one($options, 'output') : AppImage::outputPath($config, $arch, $version);
@@ -234,7 +239,7 @@ final class Cli
                 self::check($config, $arch, $runtimes['sfx'], $payload);
             }
 
-            AppImage::write($config, $runtimes, $runtime, $payload, $output, $mtime, $arch);
+            AppImage::write($config, $runtimes, $runtime, $payload, $output, $mtime, $arch, $squashfs);
         } finally {
             Filesystem::remove($work);
         }

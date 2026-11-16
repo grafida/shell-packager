@@ -15,7 +15,7 @@ use Grafida\ShellPackager\PackagerException;
 
 /**
  * A minimal, deterministic `.tar.gz` writer (POSIX ustar), streamed to disk so a package never has
- * to fit in memory. Owner and group are 0 with empty names, every entry has the same mtime, and
+ * to fit in memory. With `$gzip` false it writes a plain `.tar` (what `mksquashfs -tar` reads). Owner and group are 0 with empty names, every entry has the same mtime, and
  * entries appear in the order they are added; the gzip header carries no time or name. It exists
  * because neither `PharData` (no control over modes and times) nor BSD tar on macOS (no `--sort`,
  * `--mtime`, `--owner`) can produce a reproducible archive, and Linux packages are built on macOS
@@ -28,9 +28,9 @@ final class TarWriter
     /** @var resource */
     private $out;
 
-    private \DeflateContext $deflate;
+    private ?\DeflateContext $deflate = null;
 
-    public function __construct(string $path, private readonly int $mtime)
+    public function __construct(string $path, private readonly int $mtime, bool $gzip = true)
     {
         $out = fopen($path, 'wb');
 
@@ -38,8 +38,13 @@ final class TarWriter
             throw new PackagerException("Cannot write {$path}.");
         }
 
-        $this->out     = $out;
-        $deflate       = deflate_init(\ZLIB_ENCODING_GZIP, ['level' => 9]);
+        $this->out = $out;
+
+        if (!$gzip) {
+            return;
+        }
+
+        $deflate = deflate_init(\ZLIB_ENCODING_GZIP, ['level' => 9]);
 
         if ($deflate === false) {
             throw new PackagerException('Cannot start gzip compression.');
@@ -51,6 +56,16 @@ final class TarWriter
     public function directory(string $name, int $mode = 0o755): void
     {
         $this->emit($this->header(rtrim($name, '/') . '/', 0, $mode, '5'));
+    }
+
+    /** A symbolic link; its mode is 0777, as on Linux. */
+    public function symlink(string $name, string $target): void
+    {
+        if (\strlen($target) > 100) {
+            throw new PackagerException("Symlink target too long for a tar archive: {$target}");
+        }
+
+        $this->emit($this->header($name, 0, 0o777, '2', $target));
     }
 
     public function data(string $name, string $data, int $mode = 0o644): void
@@ -88,11 +103,15 @@ final class TarWriter
     public function close(): void
     {
         $this->emit(str_repeat("\0", self::BLOCK * 2));
-        fwrite($this->out, (string) deflate_add($this->deflate, '', \ZLIB_FINISH));
+
+        if ($this->deflate !== null) {
+            fwrite($this->out, (string) deflate_add($this->deflate, '', \ZLIB_FINISH));
+        }
+
         fclose($this->out);
     }
 
-    private function header(string $name, int $size, int $mode, string $type): string
+    private function header(string $name, int $size, int $mode, string $type, string $link = ''): string
     {
         [$prefix, $short] = self::split($name);
 
@@ -106,7 +125,7 @@ final class TarWriter
             \sprintf('%011o', $this->mtime),
             str_repeat(' ', 8),
             $type,
-            '',
+            $link,
             'ustar',
             '00',
             '',
@@ -157,9 +176,9 @@ final class TarWriter
 
     private function emit(string $bytes): void
     {
-        $compressed = deflate_add($this->deflate, $bytes, \ZLIB_NO_FLUSH);
+        $chunk = $this->deflate === null ? $bytes : deflate_add($this->deflate, $bytes, \ZLIB_NO_FLUSH);
 
-        if ($compressed === false || fwrite($this->out, $compressed) === false) {
+        if ($chunk === false || fwrite($this->out, $chunk) === false) {
             throw new PackagerException('Cannot write the archive.');
         }
     }
